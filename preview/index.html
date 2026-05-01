@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Interactive preview of GlowScout, an app for finding highly reviewed beauty and wellness pros near you."
+    />
+    <meta property="og:title" content="GlowScout App Preview" />
+    <meta
+      property="og:description"
+      content="Preview the GlowScout beauty and wellness pro locator flow, service survey, and demo results."
+    />
+    <title>GlowScout App Preview</title>
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link
+      href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="stage">
+      <section class="copy-panel" aria-labelledby="preview-title">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img" aria-label="GlowScout logo">
+              <path
+                d="M21.8 7.4c7.9 0 14.3 6.4 14.3 14.3 0 3.2-1.1 6.2-2.9 8.6l7.4 7.4-3 3-7.4-7.4a14.2 14.2 0 1 1-8.4-25.9Z"
+                fill="currentColor"
+                opacity=".18"
+              />
+              <path
+                d="M21.8 11.3a10.4 10.4 0 1 0 0 20.8 10.4 10.4 0 0 0 0-20.8Zm0 4.7 1.6 3.5 3.7.5-2.7 2.6.7 3.7-3.3-1.8-3.3 1.8.6-3.7-2.6-2.6 3.7-.5 1.6-3.5Z"
+                fill="currentColor"
+              />
+            </svg>
+          </div>
+          <div>
+            <p class="eyebrow">GlowScout</p>
+            <p class="brand-subtitle">Find top-rated beauty and wellness pros near you.</p>
+          </div>
+        </div>
+
+        <h1 id="preview-title">Preview the customer flow before App Store packaging.</h1>
+        <p class="lede">
+          This clickable preview mirrors the iOS app experience: customers enter a location, choose a
+          profession, complete a short service survey, and see top-rated demo pros that meet the
+          4.5-star and 10-review minimum.
+        </p>
+
+        <div class="criteria-card" aria-label="Quality criteria">
+          <p class="criteria-kicker">Trust filter</p>
+          <div class="criteria-grid">
+            <div>
+              <strong>4.5+</strong>
+              <span>Google rating</span>
+            </div>
+            <div>
+              <strong>10+</strong>
+              <span>Google reviews</span>
+            </div>
+            <div>
+              <strong>$</strong>
+              <span>Cost estimates</span>
+            </div>
+          </div>
+        </div>
+
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch theme">
+          Toggle dark mode
+        </button>
+      </section>
+
+      <section class="phone-shell" aria-label="GlowScout mobile app preview">
+        <div class="phone" role="application" aria-label="GlowScout demo app">
+          <div class="status-bar">
+            <span>8:05</span>
+            <span>5G 100%</span>
+          </div>
+
+          <div class="app-screen">
+            <header class="app-header">
+              <div class="app-logo" aria-hidden="true">G</div>
+              <div>
+                <p class="app-kicker">GlowScout</p>
+                <h2>Find top-rated beauty pros.</h2>
+              </div>
+            </header>
+
+            <section class="survey-card" aria-labelledby="survey-title">
+              <h3 id="survey-title">Where should we scout?</h3>
+              <label class="field-label" for="location">Zip code, town, or city</label>
+              <div class="location-combobox">
+                <input
+                  id="location"
+                  value="Austin, TX"
+                  autocomplete="address-level2"
+                  aria-autocomplete="list"
+                  aria-controls="location-suggestions"
+                  aria-expanded="false"
+                />
+                <div
+                  id="location-suggestions"
+                  class="location-suggestions"
+                  role="listbox"
+                  aria-label="City and state suggestions"
+                ></div>
+              </div>
+
+              <label class="field-label" for="profession">Profession</label>
+              <select id="profession">
+                <option value="nails">Nail technicians</option>
+                <option value="hair">Hair stylists</option>
+                <option value="barber">Barbers</option>
+                <option value="lashes">Lash artists</option>
+                <option value="brows">Brow specialists</option>
+                <option value="skin">Estheticians</option>
+                <option value="waxing">Waxing specialists</option>
+                <option value="massage">Massage therapists</option>
+                <option value="makeup">Makeup artists</option>
+                <option value="wellness">Wellness pros</option>
+              </select>
+
+              <fieldset>
+                <legend>Choose your service</legend>
+                <div class="service-list" id="service-list"></div>
+              </fieldset>
+
+              <div class="two-col">
+                <label>
+                  <span>Budget</span>
+                  <select id="budget">
+                    <option>$50-$85</option>
+                    <option>Under $50</option>
+                    <option>$85-$125</option>
+                    <option>$125+</option>
+                  </select>
+                </label>
+                <label>
+                  <span>When</span>
+                  <select id="availability">
+                    <option>This week</option>
+                    <option>Today</option>
+                    <option>Weekend</option>
+                    <option>Flexible</option>
+                  </select>
+                </label>
+              </div>
+
+              <fieldset>
+                <legend>Preferences</legend>
+                <button id="licensed-button" class="licensed-button" type="button" aria-pressed="false">
+                  <span>Licensed pro</span>
+                  <small>Prioritize pros who present as licensed or credentialed.</small>
+                </button>
+                <div class="chip-list" id="preference-list"></div>
+              </fieldset>
+
+              <button id="search-button" class="primary-button" type="button">Find verified pros</button>
+            </section>
+
+            <section class="results" aria-live="polite" aria-labelledby="results-title">
+              <div class="results-header">
+                <div>
+                  <p class="results-kicker">Demo results</p>
+                  <h3 id="results-title">3 matching pros</h3>
+                </div>
+                <span class="mode-pill">Demo mode</span>
+              </div>
+              <div id="results-list"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+    <div class="review-drawer" id="review-drawer" aria-hidden="true">
+      <div class="review-backdrop" data-close-reviews></div>
+      <section class="review-panel" role="dialog" aria-modal="true" aria-labelledby="review-title">
+        <div class="review-panel-header">
+          <div>
+            <p class="results-kicker">Google reviews</p>
+            <h2 id="review-title">Reviews</h2>
+            <p id="review-subtitle">Demo review excerpts</p>
+          </div>
+          <button type="button" class="close-reviews" data-close-reviews>Close</button>
+        </div>
+        <div id="review-list" class="review-list"></div>
+        <p class="review-disclaimer">
+          Preview mode uses demo review excerpts. The production app displays real Google reviewer names
+          and written review excerpts returned by Google Places.
+        </p>
+      </section>
+    </div>
+    <script src="./script.js" type="module"></script>
+  </body>
+</html>

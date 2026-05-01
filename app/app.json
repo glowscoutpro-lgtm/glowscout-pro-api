@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "GlowScout Pro",
+    "slug": "glowscout-pro",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "glowscoutpro",
+    "splash": {
+      "backgroundColor": "#F7F6F2"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.glowscoutpro.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "GlowScout Pro can use your location to help find highly reviewed beauty and wellness pros near you."
+      }
+    },
+    "android": {
+      "package": "com.glowscoutpro.app"
+    },
+    "extra": {
+      "apiUrl": "http://localhost:4000"
+    }
+  }
+}

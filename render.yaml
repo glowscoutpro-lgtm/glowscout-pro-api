@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: glowscout-pro-api
+    runtime: node
+    rootDir: server
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGIN
+        value: "*"
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
