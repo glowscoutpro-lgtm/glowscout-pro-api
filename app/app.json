@@ -25,7 +25,11 @@
       "package": "com.glowscoutpro.app"
     },
     "extra": {
-      "apiUrl": "https://glowscout-pro-api-xgmb.onrender.com"
-    }
+      "apiUrl": "https://glowscout-pro-api-xgmb.onrender.com",
+      "eas": {
+        "projectId": "8c3f4ae5-18f4-4c8c-919a-711e8f66a147"
+      }
+    },
+    "owner": "glowscoutpro"
   }
 }
