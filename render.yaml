@@ -3,8 +3,8 @@ services:
     name: glowscout-pro-api
     runtime: node
     plan: starter
-    buildCommand: npm run build
-    startCommand: npm start
+    buildCommand: npm --prefix server ci && npm --prefix server run build
+    startCommand: node server/dist/index.js
     autoDeploy: true
     healthCheckPath: /health
     envVars:
