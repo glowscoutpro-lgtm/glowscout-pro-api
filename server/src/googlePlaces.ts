@@ -49,6 +49,13 @@ type GeocodeResult = {
 
 const MIN_RATING = 4.5;
 const MIN_REVIEW_COUNT = 10;
+const SCORE_PRIOR_WEIGHT = 3;
+const SCORE_PRIOR_RATING = 4.5;
+const SCORE_RATING_PIVOT = 4.6;
+const SCORE_RATING_SLOPE = 200 / 3;
+const SCORE_RATING_OFFSET = 76;
+const SCORE_VOLUME_CAP = 50;
+const SCORE_MAX = 99;
 const DEFAULT_MAX_DISTANCE_MILES = 10;
 const ABSOLUTE_MAX_DISTANCE_MILES = 50;
 const MIN_RESULTS_BEFORE_FALLBACK = 3;
@@ -132,10 +139,20 @@ function buildServiceQuery(survey: SurveyPayload): string {
   return [licensedTerm, mobileTerm, selectedTerms.join(" or "), categoryTerm].filter(Boolean).join(" ");
 }
 
-function calculateScore(place: GooglePlace): number {
-  const ratingScore = ((place.rating ?? 0) / 5) * 70;
-  const reviewScore = Math.min((place.userRatingCount ?? 0) / 100, 1) * 30;
-  return Math.round(ratingScore + reviewScore);
+export function calculateScore(place: Pick<GooglePlace, "rating" | "userRatingCount">): number {
+  const rating = place.rating ?? 0;
+  const reviewCount = place.userRatingCount ?? 0;
+  if (reviewCount <= 0) {
+    return 0;
+  }
+  const shrunkRating =
+    (SCORE_PRIOR_WEIGHT * SCORE_PRIOR_RATING + reviewCount * rating) /
+    (SCORE_PRIOR_WEIGHT + reviewCount);
+  const ratingComponent =
+    (shrunkRating - SCORE_RATING_PIVOT) * SCORE_RATING_SLOPE + SCORE_RATING_OFFSET;
+  const volumeConfidence = Math.log10(1 + Math.min(reviewCount, SCORE_VOLUME_CAP));
+  const raw = ratingComponent + volumeConfidence;
+  return Math.max(0, Math.min(SCORE_MAX, Math.round(raw)));
 }
 
 function reviewHighlights(place: GooglePlace): string[] {
