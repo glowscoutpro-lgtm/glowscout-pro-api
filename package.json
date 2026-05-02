@@ -5,6 +5,8 @@
   "description": "GlowScout mobile app and API for finding highly reviewed nail and beauty professionals.",
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix app install",
+    "build": "npm --prefix server ci && npm --prefix server run build",
+    "start": "npm --prefix server start",
     "dev:server": "npm --prefix server run dev",
     "dev:app": "npm --prefix app start",
     "typecheck": "npm --prefix server run typecheck && npm --prefix app run typecheck"
