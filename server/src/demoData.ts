@@ -406,9 +406,11 @@ function toPro(template: DemoTemplate, survey: SurveyPayload, services: ServiceS
     estimatedCosts: estimateCosts(services, template.priceLevel),
     reviewHighlights: [
       template.quote,
-      survey.preferences?.includes("Licensed pro")
-        ? "Licensed pro preference is turned on. Verified badge status is shown separately."
-        : "Meets the 4.5-star and 10-review GlowScout trust filter."
+      survey.preferences?.includes("Mobile service")
+        ? "Mobile service preference is on. Demo listing includes pros that travel to you."
+        : survey.preferences?.includes("Licensed pro")
+          ? "Licensed pro preference is turned on. Verified badge status is shown separately."
+          : "Meets the 4.5-star and 10-review GlowScout trust filter."
     ],
     reviews: demoReviews(template.name),
     licenseVerification: buildLicenseVerification(template.licenseStatus, survey.category, survey.location),

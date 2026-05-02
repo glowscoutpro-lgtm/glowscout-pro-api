@@ -99,12 +99,15 @@ function buildServiceQuery(survey: SurveyPayload): string {
   const categoryTerm = CATEGORY_TERMS[survey.category] ?? CATEGORY_TERMS.nails;
   const selectedTerms = survey.services.map((service) => SERVICE_TERMS[service]).filter(Boolean);
   const licensedTerm = survey.preferences?.includes("Licensed pro") ? "licensed" : "";
+  const mobileTerm = survey.preferences?.includes("Mobile service")
+    ? "mobile at-home on-site house call comes to you travel"
+    : "";
 
   if (selectedTerms.length === 0) {
-    return [licensedTerm, categoryTerm].filter(Boolean).join(" ");
+    return [licensedTerm, mobileTerm, categoryTerm].filter(Boolean).join(" ");
   }
 
-  return [licensedTerm, selectedTerms.join(" or "), categoryTerm].filter(Boolean).join(" ");
+  return [licensedTerm, mobileTerm, selectedTerms.join(" or "), categoryTerm].filter(Boolean).join(" ");
 }
 
 function calculateScore(place: GooglePlace): number {
