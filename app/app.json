@@ -17,7 +17,8 @@
       "bundleIdentifier": "com.glowscoutpro.app",
       "buildNumber": "1",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "GlowScout Pro can use your location to help find highly reviewed beauty and wellness pros near you."
+        "NSLocationWhenInUseUsageDescription": "GlowScout Pro can use your location to help find highly reviewed beauty and wellness pros near you.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
