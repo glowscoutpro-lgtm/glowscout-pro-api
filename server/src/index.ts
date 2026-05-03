@@ -1,9 +1,16 @@
+import { createHash } from "crypto";
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import { z } from "zod";
 import { getDemoPros } from "./demoData.js";
 import { searchGooglePlaces } from "./googlePlaces.js";
+import {
+  appendFeedback,
+  buildStoredFeedback,
+  feedbackSchema,
+  listFeedback
+} from "./feedback.js";
 import type { SurveyPayload } from "./types.js";
 
 dotenv.config();
@@ -105,6 +112,61 @@ app.post("/api/pros/search", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected search error";
     res.status(502).json({ error: message });
+  }
+});
+
+function hashIp(ip: string | undefined): string | undefined {
+  if (!ip) return undefined;
+  const salt = process.env.FEEDBACK_IP_SALT ?? "glowscout-feedback";
+  return createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 16);
+}
+
+app.post("/api/feedback", async (req, res) => {
+  const parsed = feedbackSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid feedback", details: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const ipHash = hashIp(req.ip);
+    const record = buildStoredFeedback(parsed.data, ipHash);
+    await appendFeedback(record);
+    console.log(
+      `[feedback] ${record.surveyType} id=${record.id} overallRating=${record.overallRating ?? "n/a"}`
+    );
+    res.status(201).json({ ok: true, id: record.id, receivedAt: record.receivedAt });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to store feedback";
+    console.error("[feedback] failed to store:", message);
+    res.status(500).json({ error: "Unable to store feedback" });
+  }
+});
+
+app.get("/api/feedback", async (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    res.status(503).json({ error: "Admin endpoint not configured" });
+    return;
+  }
+  const provided =
+    req.header("x-admin-token") ??
+    (req.header("authorization")?.startsWith("Bearer ")
+      ? req.header("authorization")!.slice(7)
+      : undefined);
+  if (provided !== adminToken) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 500), 1), 5000);
+  try {
+    const items = await listFeedback(limit);
+    res.json({ count: items.length, items });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to read feedback";
+    res.status(500).json({ error: message });
   }
 });
 
