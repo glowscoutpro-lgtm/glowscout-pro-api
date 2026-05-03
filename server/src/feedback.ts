@@ -1,4 +1,5 @@
 import { promises as fs } from "fs";
+import os from "os";
 import path from "path";
 import { z } from "zod";
 
@@ -42,20 +43,52 @@ export type StoredFeedback = FeedbackPayload & {
   ipHash?: string;
 };
 
-const DEFAULT_DIR = path.resolve(process.cwd(), "data");
+const FALLBACK_DIR = path.join(os.tmpdir(), "glowscout-feedback");
+const MAX_MEMORY_RECORDS = 1000;
+const memoryStore: StoredFeedback[] = [];
+let resolvedDir: string | null = null;
+let useMemoryOnly = false;
 
 export function getFeedbackDir(): string {
   return process.env.FEEDBACK_DIR
     ? path.resolve(process.env.FEEDBACK_DIR)
-    : DEFAULT_DIR;
+    : FALLBACK_DIR;
 }
 
-function getFeedbackFile(): string {
-  return path.join(getFeedbackDir(), "feedback.jsonl");
+function getFeedbackFile(dir: string): string {
+  return path.join(dir, "feedback.jsonl");
 }
 
-async function ensureDir(): Promise<void> {
-  await fs.mkdir(getFeedbackDir(), { recursive: true });
+async function tryDir(dir: string): Promise<boolean> {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.access(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveWritableDir(): Promise<string | null> {
+  if (resolvedDir) return resolvedDir;
+  if (useMemoryOnly) return null;
+
+  const candidates: string[] = [];
+  if (process.env.FEEDBACK_DIR) {
+    candidates.push(path.resolve(process.env.FEEDBACK_DIR));
+  }
+  candidates.push(FALLBACK_DIR);
+
+  for (const dir of candidates) {
+    if (await tryDir(dir)) {
+      resolvedDir = dir;
+      return dir;
+    }
+  }
+
+  useMemoryOnly = true;
+  console.warn("[feedback] no writable directory available; using in-memory fallback");
+  return null;
 }
 
 function generateId(): string {
@@ -64,14 +97,38 @@ function generateId(): string {
 }
 
 export async function appendFeedback(record: StoredFeedback): Promise<void> {
-  await ensureDir();
-  const line = JSON.stringify(record) + "\n";
-  await fs.appendFile(getFeedbackFile(), line, "utf8");
+  const dir = await resolveWritableDir();
+  if (!dir) {
+    memoryStore.push(record);
+    if (memoryStore.length > MAX_MEMORY_RECORDS) {
+      memoryStore.splice(0, memoryStore.length - MAX_MEMORY_RECORDS);
+    }
+    return;
+  }
+
+  try {
+    const line = JSON.stringify(record) + "\n";
+    await fs.appendFile(getFeedbackFile(dir), line, "utf8");
+  } catch (error) {
+    console.warn("[feedback] file write failed, falling back to memory:", error);
+    useMemoryOnly = true;
+    resolvedDir = null;
+    memoryStore.push(record);
+    if (memoryStore.length > MAX_MEMORY_RECORDS) {
+      memoryStore.splice(0, memoryStore.length - MAX_MEMORY_RECORDS);
+    }
+  }
 }
 
 export async function listFeedback(limit = 500): Promise<StoredFeedback[]> {
+  const dir = await resolveWritableDir();
+  if (!dir) {
+    const start = Math.max(0, memoryStore.length - limit);
+    return memoryStore.slice(start);
+  }
+
   try {
-    const contents = await fs.readFile(getFeedbackFile(), "utf8");
+    const contents = await fs.readFile(getFeedbackFile(dir), "utf8");
     const lines = contents.split("\n").filter((line) => line.trim().length > 0);
     const start = Math.max(0, lines.length - limit);
     return lines.slice(start).map((line) => JSON.parse(line) as StoredFeedback);

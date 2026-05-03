@@ -16,11 +16,5 @@ services:
         sync: false
       - key: ADMIN_TOKEN
         sync: false
-      - key: FEEDBACK_DIR
-        value: /var/data/glowscout-feedback
       - key: FEEDBACK_IP_SALT
         sync: false
-    disk:
-      name: glowscout-feedback
-      mountPath: /var/data/glowscout-feedback
-      sizeGB: 1
