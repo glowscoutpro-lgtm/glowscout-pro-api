@@ -5,17 +5,22 @@ import { z } from "zod";
 
 const ratingField = z.coerce.number().min(0).max(5).optional();
 
+const sentimentEnum = z.enum(["yes", "somewhat", "no", "maybe"]);
+const sentimentOrRatingField = z
+  .union([sentimentEnum, z.coerce.number().min(0).max(5)])
+  .optional();
+
 const baseSchema = z.object({
   surveyType: z.enum(["consumer_beta", "professional_beta"]),
   name: z.string().trim().max(120).optional(),
   email: z.string().trim().email().max(200).optional(),
   canContact: z.boolean().optional(),
   testerRole: z.string().trim().max(120).optional(),
-  overallRating: ratingField,
-  easeOfUse: ratingField,
-  searchQuality: ratingField,
-  trustResults: ratingField,
-  wouldUseAgain: ratingField,
+  overallRating: z.coerce.number().min(1).max(5).optional(),
+  easeOfUse: sentimentOrRatingField,
+  searchQuality: sentimentOrRatingField,
+  trustResults: sentimentOrRatingField,
+  wouldUseAgain: sentimentOrRatingField,
   likedMost: z.string().trim().max(4000).optional(),
   confusingPart: z.string().trim().max(4000).optional(),
   missingFeature: z.string().trim().max(4000).optional(),
