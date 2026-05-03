@@ -104,6 +104,69 @@ const cases: Case[] = [
       overallRating: 4,
       easeOfUse: 3
     }
+  },
+  {
+    name: "surveyType 'beta' normalizes to consumer_beta",
+    input: {
+      surveyType: "beta",
+      searchQuality: "yes"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      searchQuality: "yes"
+    }
+  },
+  {
+    name: "type 'beta' alias normalizes to consumer_beta",
+    input: {
+      type: "beta",
+      likedMost: "fast"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      likedMost: "fast"
+    }
+  },
+  {
+    name: "surveyType 'pro' normalizes to professional_beta",
+    input: {
+      surveyType: "pro",
+      profession: "esthetician"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta",
+      profession: "esthetician"
+    }
+  },
+  {
+    name: "type 'pro' alias normalizes to professional_beta",
+    input: {
+      type: "pro"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta"
+    }
+  },
+  {
+    name: "surveyType 'BETA' (uppercase) normalizes",
+    input: {
+      surveyType: "BETA"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta"
+    }
+  },
+  {
+    name: "unknown surveyType value still rejected",
+    input: {
+      surveyType: "garbage"
+    },
+    expectValid: false
   }
 ];
 

@@ -50,6 +50,21 @@ const FIELD_ALIASES: Record<string, keyof z.infer<typeof baseSchema>> = {
   missing: "missingFeature"
 };
 
+const SURVEY_TYPE_ALIASES: Record<string, "consumer_beta" | "professional_beta"> = {
+  beta: "consumer_beta",
+  consumer: "consumer_beta",
+  consumer_beta: "consumer_beta",
+  pro: "professional_beta",
+  professional: "professional_beta",
+  professional_beta: "professional_beta"
+};
+
+function normalizeSurveyType(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const key = value.trim().toLowerCase();
+  return SURVEY_TYPE_ALIASES[key] ?? value;
+}
+
 export function normalizeFeedbackPayload(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return input;
@@ -61,7 +76,7 @@ export function normalizeFeedbackPayload(input: unknown): unknown {
     if (canonical in normalized && normalized[canonical] !== undefined) {
       continue;
     }
-    normalized[canonical] = value;
+    normalized[canonical] = canonical === "surveyType" ? normalizeSurveyType(value) : value;
   }
   return normalized;
 }
