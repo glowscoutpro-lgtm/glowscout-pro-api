@@ -42,6 +42,30 @@ export const feedbackSchema = baseSchema.strict();
 
 export type FeedbackPayload = z.infer<typeof feedbackSchema>;
 
+const FIELD_ALIASES: Record<string, keyof z.infer<typeof baseSchema>> = {
+  type: "surveyType",
+  searchResultsUseful: "searchQuality",
+  resultsTrustworthy: "trustResults",
+  confusing: "confusingPart",
+  missing: "missingFeature"
+};
+
+export function normalizeFeedbackPayload(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const source = input as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    const canonical = FIELD_ALIASES[key] ?? key;
+    if (canonical in normalized && normalized[canonical] !== undefined) {
+      continue;
+    }
+    normalized[canonical] = value;
+  }
+  return normalized;
+}
+
 export type StoredFeedback = FeedbackPayload & {
   id: string;
   receivedAt: string;

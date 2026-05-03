@@ -9,7 +9,8 @@ import {
   appendFeedback,
   buildStoredFeedback,
   feedbackSchema,
-  listFeedback
+  listFeedback,
+  normalizeFeedbackPayload
 } from "./feedback.js";
 import type { SurveyPayload } from "./types.js";
 
@@ -122,7 +123,8 @@ function hashIp(ip: string | undefined): string | undefined {
 }
 
 app.post("/api/feedback", async (req, res) => {
-  const parsed = feedbackSchema.safeParse(req.body);
+  const normalized = normalizeFeedbackPayload(req.body);
+  const parsed = feedbackSchema.safeParse(normalized);
 
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid feedback", details: parsed.error.flatten() });
