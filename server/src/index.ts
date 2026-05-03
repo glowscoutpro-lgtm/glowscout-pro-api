@@ -12,6 +12,7 @@ import {
   listFeedback,
   normalizeFeedbackPayload
 } from "./feedback.js";
+import { notifyFeedbackEmail } from "./notifyEmail.js";
 import type { SurveyPayload } from "./types.js";
 
 dotenv.config();
@@ -138,6 +139,20 @@ app.post("/api/feedback", async (req, res) => {
     console.log(
       `[feedback] ${record.surveyType} id=${record.id} overallRating=${record.overallRating ?? "n/a"}`
     );
+    notifyFeedbackEmail(record)
+      .then((result) => {
+        if (result.status === "sent") {
+          console.log(`[feedback] email notification sent id=${record.id}`);
+        } else if (result.status === "skipped") {
+          console.log(`[feedback] email notification skipped: ${result.reason}`);
+        } else {
+          console.warn(`[feedback] email notification failed id=${record.id}: ${result.error}`);
+        }
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[feedback] email notification threw id=${record.id}: ${message}`);
+      });
     res.status(201).json({ ok: true, id: record.id, receivedAt: record.receivedAt });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to store feedback";

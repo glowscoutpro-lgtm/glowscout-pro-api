@@ -21,6 +21,18 @@ GOOGLE_MAPS_API_KEY=<paste directly into Render, not into chat>
 ALLOWED_ORIGIN=*
 ```
 
+### Optional: feedback email notifications
+
+To get an email every time a beta tester submits feedback, add:
+
+```text
+RESEND_API_KEY=<paste from resend.com, not into chat>
+FEEDBACK_NOTIFY_EMAIL=glowscoutpro@gmail.com
+```
+
+If `RESEND_API_KEY` is unset the API silently skips email notifications and
+still stores feedback as usual. See `docs/BETA_FEEDBACK.md` for details.
+
 ## Verify after deploy
 
 Open the Render service URL and add `/health`. A healthy response should look like:

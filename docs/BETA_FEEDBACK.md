@@ -76,3 +76,36 @@ server:
 ```bash
 cat /var/data/glowscout-feedback/feedback.jsonl | jq .
 ```
+
+## Email notifications (optional)
+
+If configured, the API sends a concise plaintext email to the founder inbox
+every time a feedback submission succeeds. Email delivery is best-effort and
+non-blocking — if it fails or is unconfigured, the API still returns `201`.
+
+Provider: [Resend](https://resend.com) (free tier covers low-volume beta
+traffic).
+
+Setup:
+
+1. Sign up at resend.com and create an API key.
+2. In Render → Environment, add:
+
+   ```text
+   RESEND_API_KEY=<paste from Resend>
+   FEEDBACK_NOTIFY_EMAIL=glowscoutpro@gmail.com
+   ```
+
+3. (Optional) Override the sender address with
+   `FEEDBACK_NOTIFY_FROM="GlowScout Feedback <feedback@yourdomain.com>"`. Until
+   you verify your own domain in Resend, leave this unset — the default
+   `onboarding@resend.dev` works out of the box for testing.
+4. Redeploy. New feedback will trigger an email; if `RESEND_API_KEY` is unset
+   the server logs `email notification skipped` and the request still
+   succeeds.
+
+| Env var | Required | Default | Notes |
+|---|---|---|---|
+| `RESEND_API_KEY` | for email | _unset_ | If unset, notifications are skipped silently. |
+| `FEEDBACK_NOTIFY_EMAIL` | no | `glowscoutpro@gmail.com` | Recipient. |
+| `FEEDBACK_NOTIFY_FROM` | no | `GlowScout Feedback <onboarding@resend.dev>` | Use a verified domain once available. |

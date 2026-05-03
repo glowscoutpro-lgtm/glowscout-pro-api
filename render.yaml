@@ -18,3 +18,7 @@ services:
         sync: false
       - key: FEEDBACK_IP_SALT
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FEEDBACK_NOTIFY_EMAIL
+        value: glowscoutpro@gmail.com
