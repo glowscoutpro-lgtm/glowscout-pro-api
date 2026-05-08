@@ -11,7 +11,7 @@ export type LocationSuggestion = {
   lat: number;
   lng: number;
   radiusMiles: number;
-  source: "embedded" | "zippopotam" | "curated";
+  source: "embedded" | "zippopotam" | "curated" | "google";
 };
 
 type NearbyEntry = {
@@ -198,31 +198,63 @@ const STATE_ABBR_BY_NAME: Record<string, string> = {
 };
 
 function parseCityState(query: string): { city: string; state?: string } {
-  const trimmed = query.trim();
+  const trimmed = query.trim().replace(/\s+/g, " ");
   // Match "City, ST" or "City, State"
   const commaIdx = trimmed.lastIndexOf(",");
   if (commaIdx > 0) {
     const cityPart = trimmed.slice(0, commaIdx).trim();
     const tail = trimmed.slice(commaIdx + 1).trim();
-    if (tail.length === 2) {
+    if (tail.length === 2 && /^[A-Za-z]{2}$/.test(tail)) {
       return { city: cityPart, state: tail.toUpperCase() };
     }
     const fromName = STATE_ABBR_BY_NAME[tail.toLowerCase()];
     if (fromName) {
       return { city: cityPart, state: fromName };
     }
-    // Treat the tail as part of the city if we can't recognize it as a state.
+    // Multi-word state names ("New York") were already handled by the lowercase
+    // map above. Anything else is treated as part of the city.
     return { city: trimmed };
   }
-  // Trailing 2-letter state without a comma: "Lake Zurich IL"
+
+  // No comma. Try to peel off a trailing state. The trailing state can be:
+  //   - a 2-letter abbreviation: "St Augustine FL"
+  //   - a single-word state name: "St Augustine Florida"
+  //   - a two-word state name:   "Charlotte North Carolina"
   const tokens = trimmed.split(/\s+/);
   if (tokens.length >= 2) {
-    const last = tokens[tokens.length - 1];
-    if (last.length === 2 && /^[A-Za-z]{2}$/.test(last)) {
-      return { city: tokens.slice(0, -1).join(" "), state: last.toUpperCase() };
+    const last1 = tokens[tokens.length - 1];
+    if (last1.length === 2 && /^[A-Za-z]{2}$/.test(last1)) {
+      return { city: tokens.slice(0, -1).join(" "), state: last1.toUpperCase() };
+    }
+    const last1Name = STATE_ABBR_BY_NAME[last1.toLowerCase()];
+    if (last1Name) {
+      return { city: tokens.slice(0, -1).join(" "), state: last1Name };
+    }
+    if (tokens.length >= 3) {
+      const last2 = `${tokens[tokens.length - 2]} ${tokens[tokens.length - 1]}`;
+      const last2Name = STATE_ABBR_BY_NAME[last2.toLowerCase()];
+      if (last2Name) {
+        return { city: tokens.slice(0, -2).join(" "), state: last2Name };
+      }
     }
   }
   return { city: trimmed };
+}
+
+// Normalize common abbreviations so "St Augustine" and "Saint Augustine" match
+// the same target. Used both when comparing against the embedded city index and
+// when forming a query for the Google Geocoding fallback.
+export function normalizeCityName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\./g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    // st → saint (treat them as the same word at any token position).
+    .replace(/(^|\s)st(\s|$)/g, "$1saint$2")
+    .replace(/(^|\s)ste(\s|$)/g, "$1sainte$2")
+    .replace(/(^|\s)mt(\s|$)/g, "$1mount$2")
+    .replace(/(^|\s)ft(\s|$)/g, "$1fort$2");
 }
 
 const MAX_CITY_SUGGESTIONS = 8;
@@ -263,22 +295,145 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
   const needle = cityQuery.toLowerCase();
   if (needle.length < 2) return [];
 
+  const normalizedNeedle = normalizeCityName(cityQuery);
+
   const index = getCityIndex();
   const startsWith: CityEntry[] = [];
   const contains: CityEntry[] = [];
   for (const entry of index) {
     if (state && entry.state !== state) continue;
     const cityLower = entry.city.toLowerCase();
-    if (cityLower === needle) {
+    const cityNormalized = normalizeCityName(entry.city);
+    if (cityLower === needle || cityNormalized === normalizedNeedle) {
       startsWith.unshift(entry);
-    } else if (cityLower.startsWith(needle)) {
+    } else if (cityLower.startsWith(needle) || cityNormalized.startsWith(normalizedNeedle)) {
       startsWith.push(entry);
-    } else if (cityLower.includes(needle)) {
+    } else if (cityLower.includes(needle) || cityNormalized.includes(normalizedNeedle)) {
       contains.push(entry);
     }
   }
 
-  return [...startsWith, ...contains]
+  const embeddedHits = [...startsWith, ...contains]
     .slice(0, MAX_CITY_SUGGESTIONS)
     .map(makeCitySuggestion);
+
+  if (embeddedHits.length > 0) {
+    return embeddedHits;
+  }
+
+  // Fallback: ask Google Geocoding for a US city match. This handles cities
+  // that aren't represented in the embedded ZIP catalog (e.g. St Augustine,
+  // FL). We only call out when we have nothing locally and a query looks
+  // city-like (>= 3 chars).
+  if (needle.length < 3) return [];
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return [];
+
+  const geocoded = await geocodeCityFallback(cityQuery, state, apiKey);
+  return geocoded ? [geocoded] : [];
+}
+
+type GeocodeAddressComponent = {
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+};
+
+type GeocodeApiResult = {
+  formatted_address?: string;
+  geometry?: { location?: { lat?: number; lng?: number } };
+  address_components?: GeocodeAddressComponent[];
+  types?: string[];
+};
+
+const GEOCODE_CACHE = new Map<string, LocationSuggestion | null>();
+const GEOCODE_TIMEOUT_MS = 3000;
+
+export function _resetGeocodeCacheForTests(): void {
+  GEOCODE_CACHE.clear();
+}
+
+async function geocodeCityFallback(
+  cityQuery: string,
+  state: string | undefined,
+  apiKey: string
+): Promise<LocationSuggestion | null> {
+  const address = state ? `${cityQuery}, ${state}, USA` : `${cityQuery}, USA`;
+  const cacheKey = address.toLowerCase();
+  if (GEOCODE_CACHE.has(cacheKey)) {
+    return GEOCODE_CACHE.get(cacheKey) ?? null;
+  }
+
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("address", address);
+  url.searchParams.set("components", "country:US");
+  url.searchParams.set("key", apiKey);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEOCODE_TIMEOUT_MS);
+  let data: { status?: string; results?: GeocodeApiResult[] };
+  try {
+    const response = await fetch(url.toString(), { signal: controller.signal });
+    if (!response.ok) {
+      GEOCODE_CACHE.set(cacheKey, null);
+      return null;
+    }
+    data = (await response.json()) as { status?: string; results?: GeocodeApiResult[] };
+  } catch {
+    GEOCODE_CACHE.set(cacheKey, null);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (data.status !== "OK" || !data.results?.length) {
+    GEOCODE_CACHE.set(cacheKey, null);
+    return null;
+  }
+
+  // Prefer a result that geocoded as a locality (true town/city), then fall
+  // back to the top result. We require US country and a usable lat/lng.
+  const localityResult =
+    data.results.find((r) => r.types?.includes("locality")) ??
+    data.results.find((r) => r.types?.includes("administrative_area_level_3")) ??
+    data.results.find((r) => r.types?.includes("postal_town")) ??
+    data.results[0];
+
+  const components = localityResult.address_components ?? [];
+  const country = components.find((c) => c.types?.includes("country"));
+  if (country && (country.short_name ?? country.long_name) !== "US") {
+    GEOCODE_CACHE.set(cacheKey, null);
+    return null;
+  }
+
+  const localityComp =
+    components.find((c) => c.types?.includes("locality")) ??
+    components.find((c) => c.types?.includes("postal_town")) ??
+    components.find((c) => c.types?.includes("administrative_area_level_3")) ??
+    components.find((c) => c.types?.includes("administrative_area_level_2"));
+  const adminComp = components.find((c) => c.types?.includes("administrative_area_level_1"));
+  const postalComp = components.find((c) => c.types?.includes("postal_code"));
+
+  const cityName = localityComp?.long_name ?? localityComp?.short_name ?? cityQuery;
+  const stateAbbr = adminComp?.short_name ?? adminComp?.long_name ?? state ?? "";
+  const lat = localityResult.geometry?.location?.lat;
+  const lng = localityResult.geometry?.location?.lng;
+  if (typeof lat !== "number" || typeof lng !== "number" || !stateAbbr) {
+    GEOCODE_CACHE.set(cacheKey, null);
+    return null;
+  }
+
+  const suggestion: LocationSuggestion = {
+    type: "city",
+    label: `${cityName}, ${stateAbbr}`,
+    city: cityName,
+    state: stateAbbr,
+    postalCode: postalComp?.long_name ?? postalComp?.short_name,
+    lat,
+    lng,
+    radiusMiles: cityRadiusMiles(stateAbbr),
+    source: "google"
+  };
+  GEOCODE_CACHE.set(cacheKey, suggestion);
+  return suggestion;
 }

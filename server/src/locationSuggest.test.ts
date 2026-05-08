@@ -1,5 +1,7 @@
 import {
   _resetCityIndexForTests,
+  _resetGeocodeCacheForTests,
+  normalizeCityName,
   suggestLocations,
   type LocationSuggestion
 } from "./locationSuggest.js";
@@ -101,6 +103,144 @@ async function run(): Promise<void> {
     assert(empty.length === 0, "empty query returns no suggestions");
     const single = await suggestLocations("a");
     assert(single.length === 0, "single-character text query returns no suggestions");
+  }
+
+  // St/Saint normalization
+  {
+    assert(normalizeCityName("St Augustine") === "saint augustine", "normalizeCityName: St → Saint");
+    assert(normalizeCityName("Saint Augustine") === "saint augustine", "normalizeCityName: Saint stays Saint");
+    assert(normalizeCityName("St. Louis") === "saint louis", "normalizeCityName: St. → Saint");
+    assert(normalizeCityName("Mt Vernon") === "mount vernon", "normalizeCityName: Mt → Mount");
+    assert(normalizeCityName("Ft Lauderdale") === "fort lauderdale", "normalizeCityName: Ft → Fort");
+  }
+
+  // Embedded "St. Louis" matches both "St Louis" and "Saint Louis"
+  {
+    const stLouis = await suggestLocations("St Louis");
+    assert(
+      stLouis.some((s) => s.city === "St. Louis" && s.state === "MO"),
+      "St Louis matches embedded St. Louis, MO"
+    );
+    const saintLouis = await suggestLocations("Saint Louis");
+    assert(
+      saintLouis.some((s) => s.city === "St. Louis" && s.state === "MO"),
+      "Saint Louis matches embedded St. Louis, MO"
+    );
+  }
+
+  // City + spelled-out state: "Lake Zurich Illinois"
+  {
+    const items = await suggestLocations("Lake Zurich Illinois");
+    assert(
+      items.some((s) => s.city === "Lake Zurich" && s.state === "IL"),
+      "Lake Zurich Illinois (no comma) parses state name"
+    );
+  }
+
+  // Two-word state name: "Charlotte North Carolina"
+  {
+    const items = await suggestLocations("Charlotte North Carolina");
+    assert(
+      items.some((s) => s.city === "Charlotte" && s.state === "NC"),
+      "Charlotte North Carolina parses two-word state"
+    );
+  }
+
+  // Google Geocoding fallback for city not in embedded catalog
+  // Test all four variants: St Augustine FL, St Augustine Florida,
+  // Saint Augustine FL, Saint Augustine Florida.
+  {
+    const variants = [
+      "St Augustine FL",
+      "St Augustine Florida",
+      "Saint Augustine FL",
+      "Saint Augustine Florida",
+      "St Augustine, FL"
+    ];
+    for (const variant of variants) {
+      const originalFetch = globalThis.fetch;
+      let fetchedUrl = "";
+      globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+        fetchedUrl = typeof input === "string" ? input : input.toString();
+        const body = JSON.stringify({
+          status: "OK",
+          results: [
+            {
+              formatted_address: "St. Augustine, FL, USA",
+              geometry: { location: { lat: 29.9012, lng: -81.3124 } },
+              types: ["locality", "political"],
+              address_components: [
+                { long_name: "St. Augustine", short_name: "St. Augustine", types: ["locality", "political"] },
+                { long_name: "Florida", short_name: "FL", types: ["administrative_area_level_1", "political"] },
+                { long_name: "United States", short_name: "US", types: ["country", "political"] }
+              ]
+            }
+          ]
+        });
+        return new Response(body, { status: 200 });
+      }) as typeof globalThis.fetch;
+      const originalKey = process.env.GOOGLE_MAPS_API_KEY;
+      process.env.GOOGLE_MAPS_API_KEY = "test-key";
+      try {
+        _resetGeocodeCacheForTests();
+        const items = await suggestLocations(variant);
+        assert(items.length >= 1, `${variant}: returns at least one suggestion via Google fallback`);
+        const sa = items.find((s) => s.city === "St. Augustine");
+        assert(sa != null, `${variant}: includes St. Augustine`);
+        assert(sa?.state === "FL", `${variant}: state resolved as FL`);
+        assert(sa?.source === "google", `${variant}: source is google`);
+        assert(typeof sa?.lat === "number" && typeof sa?.lng === "number", `${variant}: has lat/lng`);
+        assert(fetchedUrl.includes("components=country%3AUS"), `${variant}: geocode call restricts to US`);
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalKey == null) {
+          delete process.env.GOOGLE_MAPS_API_KEY;
+        } else {
+          process.env.GOOGLE_MAPS_API_KEY = originalKey;
+        }
+      }
+    }
+  }
+
+  // No Google fallback when API key is unset → falls back to empty
+  {
+    const originalKey = process.env.GOOGLE_MAPS_API_KEY;
+    delete process.env.GOOGLE_MAPS_API_KEY;
+    try {
+      _resetGeocodeCacheForTests();
+      const items = await suggestLocations("Truth or Consequences NM");
+      assert(
+        items.length === 0,
+        "no GOOGLE_MAPS_API_KEY → unknown city returns empty list"
+      );
+    } finally {
+      if (originalKey != null) process.env.GOOGLE_MAPS_API_KEY = originalKey;
+    }
+  }
+
+  // Embedded match still wins over Google fallback (no API call needed)
+  {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = (async (): Promise<Response> => {
+      fetchCalled = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof globalThis.fetch;
+    const originalKey = process.env.GOOGLE_MAPS_API_KEY;
+    process.env.GOOGLE_MAPS_API_KEY = "test-key";
+    try {
+      _resetGeocodeCacheForTests();
+      const items = await suggestLocations("Lake Zurich");
+      assert(items.length >= 1, "Lake Zurich still resolves from embedded index when API key is set");
+      assert(!fetchCalled, "Embedded match short-circuits Google geocoding fallback");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey == null) {
+        delete process.env.GOOGLE_MAPS_API_KEY;
+      } else {
+        process.env.GOOGLE_MAPS_API_KEY = originalKey;
+      }
+    }
   }
 
   // Unknown ZIP with offline-only resolver returns empty list (no global guesses)

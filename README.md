@@ -70,6 +70,10 @@ For ZIP queries (e.g. `60047`, `90210`, `10001`) the response includes:
 
 For city text queries (e.g. `Lake Zurich`, `New York, NY`, `Bev`) the response is a list of matching `city` suggestions sourced from the embedded ZIP catalog. Each suggestion carries `lat`, `lng`, `label`, `city`, `state`, optional `postalCode`, `type`, and a `radiusMiles` hint that the client can pass through to `/api/pros/search`.
 
+`St`/`Saint` (also `Mt`/`Mount`, `Ft`/`Fort`) are treated as the same word, and trailing state names work as 2-letter codes or full names with or without a comma — `St Augustine FL`, `Saint Augustine, Florida`, `Charlotte North Carolina` all parse correctly.
+
+When a city query has no embedded match and `GOOGLE_MAPS_API_KEY` is configured, the suggester falls back to Google's Geocoding API (restricted to US results) so towns like `St Augustine, FL` return a single high-confidence `city` suggestion with `source: "google"`. Without an API key, unknown cities return an empty list.
+
 Example:
 
 ```bash
