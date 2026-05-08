@@ -125,7 +125,7 @@ export type ResolvedLocation = {
   postalCode?: string;
   country?: string;
   isPostalQuery: boolean;
-  source: "geocode" | "demo" | "unresolved";
+  source: "geocode" | "zip-centroid" | "demo" | "unresolved";
 };
 
 export type SearchCenter = {

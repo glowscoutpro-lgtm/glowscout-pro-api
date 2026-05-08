@@ -10,6 +10,11 @@ import type {
   ServiceSlug,
   SurveyPayload
 } from "./types.js";
+import {
+  isUsZipQuery,
+  resolveUsZip,
+  zipCentroidToResolvedLocation
+} from "./zipResolver.js";
 
 type GoogleAddressComponent = {
   longText?: string;
@@ -400,16 +405,22 @@ function passesQualityFilters(place: GooglePlace): boolean {
   return (place.rating ?? 0) >= MIN_RATING && (place.userRatingCount ?? 0) >= MIN_REVIEW_COUNT;
 }
 
-function buildResolvedLocation(query: string, geocode: GeocodeResult | null): ResolvedLocation | null {
-  if (!geocode) {
-    return {
-      query,
-      isPostalQuery: isPostalQuery(query),
-      source: "unresolved"
-    };
-  }
+type ResolvedCenter = {
+  lat: number;
+  lng: number;
+  formattedAddress?: string;
+  locality?: string;
+  administrativeArea?: string;
+  postalCode?: string;
+  country?: string;
+  isPostalQuery: boolean;
+  source: "geocode" | "zip-centroid";
+};
+
+function geocodeToResolvedCenter(geocode: GeocodeResult): ResolvedCenter {
   return {
-    query,
+    lat: geocode.lat,
+    lng: geocode.lng,
     formattedAddress: geocode.formattedAddress,
     locality: geocode.locality,
     administrativeArea: geocode.administrativeArea,
@@ -420,6 +431,49 @@ function buildResolvedLocation(query: string, geocode: GeocodeResult | null): Re
   };
 }
 
+function resolvedCenterToLocation(query: string, center: ResolvedCenter): ResolvedLocation {
+  return {
+    query,
+    formattedAddress: center.formattedAddress,
+    locality: center.locality,
+    administrativeArea: center.administrativeArea,
+    postalCode: center.postalCode,
+    country: center.country,
+    isPostalQuery: center.isPostalQuery,
+    source: center.source
+  };
+}
+
+async function resolveLocation(
+  rawLocation: string,
+  apiKey: string
+): Promise<ResolvedCenter | null> {
+  const geocode = await geocodeLocation(rawLocation, apiKey);
+  if (geocode) {
+    return geocodeToResolvedCenter(geocode);
+  }
+
+  if (isUsZipQuery(rawLocation)) {
+    const centroid = await resolveUsZip(rawLocation);
+    if (centroid) {
+      const resolved = zipCentroidToResolvedLocation(rawLocation, centroid);
+      return {
+        lat: centroid.lat,
+        lng: centroid.lng,
+        formattedAddress: resolved.formattedAddress,
+        locality: resolved.locality,
+        administrativeArea: resolved.administrativeArea,
+        postalCode: resolved.postalCode,
+        country: resolved.country,
+        isPostalQuery: true,
+        source: "zip-centroid"
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string): Promise<SearchResult> {
   const baseQuery = buildServiceQuery(survey);
   const maxDistanceMiles = clampDistanceMiles(survey.maxDistanceMiles);
@@ -428,10 +482,31 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
     ABSOLUTE_MAX_DISTANCE_MILES * METERS_PER_MILE
   );
 
-  const geocode = await geocodeLocation(survey.location, apiKey);
-  const resolvedLocation = buildResolvedLocation(survey.location, geocode);
+  const center = await resolveLocation(survey.location, apiKey);
 
-  if (!geocode) {
+  if (!center) {
+    const looksPostal = isPostalQuery(survey.location);
+    const resolvedLocation: ResolvedLocation = {
+      query: survey.location,
+      isPostalQuery: looksPostal,
+      source: "unresolved"
+    };
+
+    if (looksPostal) {
+      // Refuse to do an unrestricted global text search for postal-shaped
+      // queries — that path produces out-of-state false positives like
+      // "Beverly Hills Premier Nail Salon Pittsburgh" for ZIP 90210.
+      return {
+        pros: [],
+        debug: {
+          resolvedLocation,
+          searchCenter: null,
+          rawResultCount: 0,
+          filteredOutCount: 0
+        }
+      };
+    }
+
     const textQueryWithLocation = `${baseQuery} near ${survey.location}`;
     const places = await callPlacesTextSearch(apiKey, textQueryWithLocation);
     const pros = places
@@ -449,22 +524,23 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
     };
   }
 
+  const resolvedLocation = resolvedCenterToLocation(survey.location, center);
   const searchCenter: SearchCenter = {
-    lat: geocode.lat,
-    lng: geocode.lng,
+    lat: center.lat,
+    lng: center.lng,
     radiusMiles: maxDistanceMiles
   };
 
-  const textQueryWithLocation = formatQueryWithGeocode(baseQuery, geocode, survey.location);
+  const textQueryWithLocation = formatQueryWithCenter(baseQuery, center, survey.location);
 
   const places = await callPlacesTextSearch(
     apiKey,
     textQueryWithLocation,
-    { latitude: geocode.lat, longitude: geocode.lng, radiusMeters },
-    { latitude: geocode.lat, longitude: geocode.lng, radiusMeters }
+    { latitude: center.lat, longitude: center.lng, radiusMeters },
+    { latitude: center.lat, longitude: center.lng, radiusMeters }
   );
 
-  const treatAsPostal = geocode.isPostalQuery || isPostalQuery(survey.location);
+  const treatAsPostal = center.isPostalQuery || isPostalQuery(survey.location);
 
   type Annotated = { place: GooglePlace; distance: number };
   const annotated: Annotated[] = [];
@@ -473,26 +549,30 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
     const lat = place.location?.latitude;
     const lng = place.location?.longitude;
     if (typeof lat !== "number" || typeof lng !== "number") continue;
-    const distance = haversineMiles(geocode.lat, geocode.lng, lat, lng);
+    const distance = haversineMiles(center.lat, center.lng, lat, lng);
     if (distance > maxDistanceMiles) continue;
     annotated.push({ place, distance });
   }
 
   let filtered: Annotated[] = annotated;
 
-  if (geocode.administrativeArea) {
-    const adminTarget = normalize(geocode.administrativeArea);
+  if (center.administrativeArea) {
+    const adminTarget = normalize(center.administrativeArea);
     const adminMatches = annotated.filter((entry) => {
       const placeAdmin = normalize(placeAdminArea(entry.place));
       return placeAdmin && placeAdmin === adminTarget;
     });
-    if (adminMatches.length > 0 && adminMatches.length < annotated.length) {
+    if (treatAsPostal) {
+      // For postal queries, never fall back to out-of-state results — apply
+      // the admin-area filter strictly even if it leaves zero matches.
+      filtered = adminMatches;
+    } else if (adminMatches.length > 0 && adminMatches.length < annotated.length) {
       filtered = adminMatches;
     }
   }
 
-  if (treatAsPostal && geocode.postalCode) {
-    const postalTarget = normalize(geocode.postalCode);
+  if (treatAsPostal && center.postalCode) {
+    const postalTarget = normalize(center.postalCode);
     const postalMatches = filtered.filter((entry) => {
       const placePostal = normalize(placePostalCode(entry.place));
       return placePostal && placePostal === postalTarget;
@@ -500,9 +580,9 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
     if (postalMatches.length >= MIN_RESULTS_BEFORE_FALLBACK) {
       filtered = postalMatches;
     }
-  } else if (geocode.locality) {
+  } else if (center.locality) {
     const localityMatches = filtered.filter((entry) =>
-      placeMatchesLocality(entry.place, geocode.locality!)
+      placeMatchesLocality(entry.place, center.locality!)
     );
     if (localityMatches.length >= MIN_RESULTS_BEFORE_FALLBACK) {
       filtered = localityMatches;
@@ -524,8 +604,8 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
   };
 }
 
-function formatQueryWithGeocode(baseQuery: string, geocode: GeocodeResult, originalLocation: string): string {
-  const locationParts = [geocode.locality, geocode.administrativeArea, geocode.postalCode]
+function formatQueryWithCenter(baseQuery: string, center: ResolvedCenter, originalLocation: string): string {
+  const locationParts = [center.locality, center.administrativeArea, center.postalCode]
     .filter((part): part is string => Boolean(part && part.trim().length > 0));
   const locationLabel = locationParts.length > 0 ? locationParts.join(", ") : originalLocation;
   return `${baseQuery} near ${locationLabel}`;
