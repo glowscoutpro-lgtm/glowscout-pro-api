@@ -1,5 +1,5 @@
 import { getDemoPros } from "./demoData.js";
-import { haversineMiles } from "./googlePlaces.js";
+import { buildPlacesTextSearchBody, haversineMiles } from "./googlePlaces.js";
 import type { SurveyPayload } from "./types.js";
 import {
   _resetZipCacheForTests,
@@ -25,6 +25,35 @@ const baseSurvey = (location: string, overrides: Partial<SurveyPayload> = {}): S
   maxDistanceMiles: 10,
   ...overrides
 });
+
+// Places Text Search v1 request body schema: must use locationBias.circle and
+// must NOT use locationRestriction (Google rejects locationRestriction.circle
+// with "Unknown name 'circle' at 'location_restriction'"). locationRestriction
+// in v1 only supports `rectangle`, so we use locationBias.circle and rely on
+// the in-process haversine + admin/postal post-filter to enforce the radius.
+{
+  const body = buildPlacesTextSearchBody("nail salon near 90210", {
+    latitude: 34.0901,
+    longitude: -118.4065,
+    radiusMeters: 16093
+  });
+  assert(body.textQuery === "nail salon near 90210", "request body has textQuery");
+  assert(typeof body.minRating === "number", "request body has minRating");
+  assert(body.maxResultCount === 20, "request body has maxResultCount=20");
+  assert(body.includePureServiceAreaBusinesses === true, "request body opts in to pure service-area businesses");
+  assert(!("locationRestriction" in body), "request body must NOT include locationRestriction (v1 rejects circle there)");
+  const bias = body.locationBias as { circle?: { center?: { latitude?: number; longitude?: number }; radius?: number } } | undefined;
+  assert(bias != null && bias.circle != null, "request body uses locationBias.circle");
+  assert(
+    bias?.circle?.center?.latitude === 34.0901 && bias?.circle?.center?.longitude === -118.4065,
+    "locationBias.circle.center matches resolved coordinates"
+  );
+  assert(bias?.circle?.radius === 16093, "locationBias.circle.radius is in meters");
+
+  const noBias = buildPlacesTextSearchBody("nail salon");
+  assert(!("locationBias" in noBias), "no locationBias when no center provided");
+  assert(!("locationRestriction" in noBias), "no locationRestriction when no center provided");
+}
 
 // 60047: Elina inclusion + correct resolved location
 {
@@ -208,13 +237,18 @@ async function searchFallbackTest(): Promise<void> {
     ]
   };
 
-  globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+  let capturedPlacesBody: Record<string, unknown> | null = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url.includes("maps.googleapis.com/maps/api/geocode")) {
       // Simulate REQUEST_DENIED → handled as null geocode by current code
       return stub({ status: "REQUEST_DENIED", error_message: "Geocoding API not enabled" }) as unknown as Response;
     }
     if (url.includes("places.googleapis.com")) {
+      const raw = init?.body;
+      if (typeof raw === "string") {
+        capturedPlacesBody = JSON.parse(raw);
+      }
       return stub(placesPayload) as unknown as Response;
     }
     if (url.includes("api.zippopotam.us")) {
@@ -257,6 +291,104 @@ async function searchFallbackTest(): Promise<void> {
       result.pros.every((p) => p.rating >= 4.5 && p.reviewCount >= 10),
       "Quality filters still applied (rating >=4.5 reviewCount >=10)"
     );
+
+    // Outgoing Places v1 request schema sanity — this is what triggered the
+    // 400 in production: locationRestriction.circle is not supported.
+    assert(capturedPlacesBody != null, "Places searchText was called and body captured");
+    if (capturedPlacesBody) {
+      assert(
+        !("locationRestriction" in capturedPlacesBody),
+        "Outgoing request must NOT include locationRestriction (v1 rejects circle)"
+      );
+      const bias = (capturedPlacesBody as { locationBias?: { circle?: { center?: { latitude?: number; longitude?: number }; radius?: number } } }).locationBias;
+      assert(
+        bias?.circle?.center?.latitude != null && bias?.circle?.center?.longitude != null,
+        "Outgoing request uses locationBias.circle with center"
+      );
+      assert(
+        typeof bias?.circle?.radius === "number" && (bias!.circle!.radius as number) > 0,
+        "Outgoing request locationBias.circle has positive radius"
+      );
+      assert(
+        typeof (capturedPlacesBody as { textQuery?: string }).textQuery === "string",
+        "Outgoing request has textQuery"
+      );
+    }
+
+    // 60047 must include Elina via the live search path
+    capturedPlacesBody = null;
+    const elinaPayload = {
+      places: [
+        {
+          id: "elina",
+          displayName: { text: "Elina Nail Studio" },
+          formattedAddress: "100 Main St, Lake Zurich, IL 60047",
+          rating: 4.9,
+          userRatingCount: 220,
+          location: { latitude: 42.196, longitude: -88.0934 },
+          addressComponents: [
+            { longText: "Lake Zurich", shortText: "Lake Zurich", types: ["locality"] },
+            { longText: "Illinois", shortText: "IL", types: ["administrative_area_level_1"] },
+            { longText: "60047", shortText: "60047", types: ["postal_code"] }
+          ]
+        },
+        {
+          id: "out-of-state",
+          displayName: { text: "Pittsburgh Nails" },
+          formattedAddress: "1 5th Ave, Pittsburgh, PA 15222",
+          rating: 4.8,
+          userRatingCount: 50,
+          location: { latitude: 40.4406, longitude: -79.9959 },
+          addressComponents: [
+            { longText: "Pittsburgh", shortText: "Pittsburgh", types: ["locality"] },
+            { longText: "Pennsylvania", shortText: "PA", types: ["administrative_area_level_1"] },
+            { longText: "15222", shortText: "15222", types: ["postal_code"] }
+          ]
+        }
+      ]
+    };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("maps.googleapis.com/maps/api/geocode")) {
+        return stub({ status: "REQUEST_DENIED" }) as unknown as Response;
+      }
+      if (url.includes("places.googleapis.com")) {
+        const raw = init?.body;
+        if (typeof raw === "string") {
+          capturedPlacesBody = JSON.parse(raw);
+        }
+        return stub(elinaPayload) as unknown as Response;
+      }
+      if (url.includes("api.zippopotam.us")) {
+        return stub({}, false, 404) as unknown as Response;
+      }
+      throw new Error("unexpected fetch in test: " + url);
+    }) as typeof globalThis.fetch;
+    _resetZipCacheForTests();
+    const elinaResult = await searchGooglePlaces(baseSurvey("60047"), "fake-key");
+    assert(
+      elinaResult.pros.some((p) => p.name === "Elina Nail Studio"),
+      "60047 live search includes Elina Nail Studio"
+    );
+    assert(
+      !elinaResult.pros.some((p) => /pittsburgh/i.test(p.name) || /pittsburgh/i.test(p.address)),
+      "60047 live search excludes Pittsburgh false positive"
+    );
+    assert(
+      elinaResult.pros.every((p) => typeof p.distanceMiles === "number"),
+      "60047 results carry distanceMiles"
+    );
+    if (capturedPlacesBody) {
+      const b = capturedPlacesBody as { locationBias?: { circle?: { center?: { latitude?: number } } } };
+      assert(
+        !("locationRestriction" in (capturedPlacesBody as object)),
+        "60047 outgoing request must NOT include locationRestriction"
+      );
+      assert(
+        typeof b.locationBias?.circle?.center?.latitude === "number",
+        "60047 outgoing request uses locationBias.circle"
+      );
+    }
 
     // Unresolved postal: an unknown ZIP that the embedded set doesn't have
     // and (in this test) zippopotam returns 404 → must NOT do an

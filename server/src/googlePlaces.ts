@@ -312,12 +312,12 @@ function clampDistanceMiles(value: number | undefined): number {
   return Math.min(value, ABSOLUTE_MAX_DISTANCE_MILES);
 }
 
-async function callPlacesTextSearch(
-  apiKey: string,
+export type PlacesCircle = { latitude: number; longitude: number; radiusMeters: number };
+
+export function buildPlacesTextSearchBody(
   textQuery: string,
-  locationRestriction?: { latitude: number; longitude: number; radiusMeters: number },
-  locationBias?: { latitude: number; longitude: number; radiusMeters: number }
-): Promise<GooglePlace[]> {
+  locationBias?: PlacesCircle
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     textQuery,
     minRating: MIN_RATING,
@@ -325,14 +325,13 @@ async function callPlacesTextSearch(
     includePureServiceAreaBusinesses: true
   };
 
-  if (locationRestriction) {
-    body.locationRestriction = {
-      circle: {
-        center: { latitude: locationRestriction.latitude, longitude: locationRestriction.longitude },
-        radius: locationRestriction.radiusMeters
-      }
-    };
-  } else if (locationBias) {
+  // Places Text Search v1 supports `locationBias.circle` but does NOT support
+  // `locationRestriction.circle` — locationRestriction only accepts `rectangle`.
+  // Sending circle on locationRestriction returns
+  //   400 Unknown name 'circle' at 'location_restriction'
+  // We rely on locationBias for the API hint and apply a strict haversine +
+  // admin/postal post-filter in the caller to enforce the radius.
+  if (locationBias) {
     body.locationBias = {
       circle: {
         center: { latitude: locationBias.latitude, longitude: locationBias.longitude },
@@ -340,6 +339,16 @@ async function callPlacesTextSearch(
       }
     };
   }
+
+  return body;
+}
+
+async function callPlacesTextSearch(
+  apiKey: string,
+  textQuery: string,
+  locationBias?: PlacesCircle
+): Promise<GooglePlace[]> {
+  const body = buildPlacesTextSearchBody(textQuery, locationBias);
 
   const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
@@ -536,7 +545,6 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
   const places = await callPlacesTextSearch(
     apiKey,
     textQueryWithLocation,
-    { latitude: center.lat, longitude: center.lng, radiusMeters },
     { latitude: center.lat, longitude: center.lng, radiusMeters }
   );
 
