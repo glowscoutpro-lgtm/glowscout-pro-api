@@ -204,17 +204,93 @@ async function run(): Promise<void> {
 
   // No Google fallback when API key is unset → falls back to empty
   {
-    const originalKey = process.env.GOOGLE_MAPS_API_KEY;
-    delete process.env.GOOGLE_MAPS_API_KEY;
+    const candidateNames = [
+      "GOOGLE_MAPS_API_KEY",
+      "GOOGLE_PLACES_API_KEY",
+      "GOOGLE_MAPS_PLATFORM_API_KEY",
+      "GOOGLE_API_KEY",
+      "MAPS_API_KEY",
+      "PLACES_API_KEY"
+    ];
+    const originalValues: Record<string, string | undefined> = {};
+    for (const name of candidateNames) {
+      originalValues[name] = process.env[name];
+      delete process.env[name];
+    }
     try {
       _resetGeocodeCacheForTests();
       const items = await suggestLocations("Truth or Consequences NM");
       assert(
         items.length === 0,
-        "no GOOGLE_MAPS_API_KEY → unknown city returns empty list"
+        "no Google API key env var set → unknown city returns empty list"
       );
     } finally {
-      if (originalKey != null) process.env.GOOGLE_MAPS_API_KEY = originalKey;
+      for (const name of candidateNames) {
+        if (originalValues[name] != null) process.env[name] = originalValues[name];
+      }
+    }
+  }
+
+  // Geocoding fallback also fires when only an alternate env var is set
+  // (e.g. GOOGLE_PLACES_API_KEY) and GOOGLE_MAPS_API_KEY is absent.
+  {
+    const candidateNames = [
+      "GOOGLE_MAPS_API_KEY",
+      "GOOGLE_PLACES_API_KEY",
+      "GOOGLE_MAPS_PLATFORM_API_KEY",
+      "GOOGLE_API_KEY",
+      "MAPS_API_KEY",
+      "PLACES_API_KEY"
+    ];
+    const originalValues: Record<string, string | undefined> = {};
+    for (const name of candidateNames) {
+      originalValues[name] = process.env[name];
+      delete process.env[name];
+    }
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    let fetchedUrl = "";
+    globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+      fetchCalled = true;
+      fetchedUrl = typeof input === "string" ? input : input.toString();
+      const body = JSON.stringify({
+        status: "OK",
+        results: [
+          {
+            formatted_address: "St. Augustine, FL, USA",
+            geometry: { location: { lat: 29.9012, lng: -81.3124 } },
+            types: ["locality", "political"],
+            address_components: [
+              { long_name: "St. Augustine", short_name: "St. Augustine", types: ["locality", "political"] },
+              { long_name: "Florida", short_name: "FL", types: ["administrative_area_level_1", "political"] },
+              { long_name: "United States", short_name: "US", types: ["country", "political"] }
+            ]
+          }
+        ]
+      });
+      return new Response(body, { status: 200 });
+    }) as typeof globalThis.fetch;
+    process.env.GOOGLE_PLACES_API_KEY = "places-only-key";
+    try {
+      _resetGeocodeCacheForTests();
+      const items = await suggestLocations("St Augustine FL");
+      assert(fetchCalled, "GOOGLE_PLACES_API_KEY-only env triggers Google geocoding fallback");
+      assert(
+        fetchedUrl.includes("key=places-only-key"),
+        "geocode call uses the alternate-env-var key value"
+      );
+      const sa = items.find((s) => s.city === "St. Augustine");
+      assert(sa != null, "GOOGLE_PLACES_API_KEY-only env still returns a St. Augustine suggestion");
+      assert(sa?.source === "google", "alternate-env suggestion source is google");
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const name of candidateNames) {
+        if (originalValues[name] != null) {
+          process.env[name] = originalValues[name];
+        } else {
+          delete process.env[name];
+        }
+      }
     }
   }
 

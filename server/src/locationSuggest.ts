@@ -1,3 +1,4 @@
+import { resolveGoogleApiKey } from "./googleApiKey.js";
 import { EMBEDDED_ZIP_CENTROIDS, extractUsZip, resolveUsZip } from "./zipResolver.js";
 
 export type LocationSuggestionType = "zip" | "city" | "nearby";
@@ -259,6 +260,12 @@ export function normalizeCityName(value: string): string {
 
 const MAX_CITY_SUGGESTIONS = 8;
 
+let loggedMissingKeyOnce = false;
+
+export function _resetMissingKeyLogForTests(): void {
+  loggedMissingKeyOnce = false;
+}
+
 export async function suggestLocations(query: string): Promise<LocationSuggestion[]> {
   const trimmed = query?.trim() ?? "";
   if (trimmed.length === 0) return [];
@@ -326,8 +333,16 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
   // FL). We only call out when we have nothing locally and a query looks
   // city-like (>= 3 chars).
   if (needle.length < 3) return [];
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return [];
+  const { apiKey, checked } = resolveGoogleApiKey();
+  if (!apiKey) {
+    if (!loggedMissingKeyOnce) {
+      loggedMissingKeyOnce = true;
+      console.warn(
+        `[locationSuggest] Google Geocoding fallback skipped: no API key set. Checked env vars: ${checked.join(", ")}.`
+      );
+    }
+    return [];
+  }
 
   const geocoded = await geocodeCityFallback(cityQuery, state, apiKey);
   return geocoded ? [geocoded] : [];

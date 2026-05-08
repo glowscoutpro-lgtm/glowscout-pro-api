@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import express from "express";
 import { z } from "zod";
 import { getDemoPros } from "./demoData.js";
+import { resolveGoogleApiKey } from "./googleApiKey.js";
 import { searchGooglePlaces } from "./googlePlaces.js";
 import {
   appendFeedback,
@@ -99,7 +100,7 @@ app.post("/api/pros/search", async (req, res) => {
   }
 
   const survey = parsed.data as SurveyPayload;
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const { apiKey } = resolveGoogleApiKey();
 
   try {
     const result = apiKey ? await searchGooglePlaces(survey, apiKey) : getDemoPros(survey);
@@ -130,7 +131,13 @@ app.get("/api/locations/suggest", async (req, res) => {
   }
   try {
     const suggestions = await suggestLocations(query);
-    res.json({ query, count: suggestions.length, suggestions });
+    const { source: keySource } = resolveGoogleApiKey();
+    res.json({
+      query,
+      count: suggestions.length,
+      suggestions,
+      googleKeySource: keySource ?? null
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Suggestion lookup failed";
     res.status(502).json({ error: message });
