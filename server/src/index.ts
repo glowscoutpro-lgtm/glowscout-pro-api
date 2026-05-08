@@ -12,6 +12,7 @@ import {
   listFeedback,
   normalizeFeedbackPayload
 } from "./feedback.js";
+import { suggestLocations } from "./locationSuggest.js";
 import { notifyFeedbackEmail } from "./notifyEmail.js";
 import type { SurveyPayload } from "./types.js";
 
@@ -116,6 +117,22 @@ app.post("/api/pros/search", async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected search error";
+    res.status(502).json({ error: message });
+  }
+});
+
+app.get("/api/locations/suggest", async (req, res) => {
+  const raw = req.query.q;
+  const query = typeof raw === "string" ? raw : Array.isArray(raw) ? String(raw[0] ?? "") : "";
+  if (!query.trim()) {
+    res.status(400).json({ error: "Missing query parameter `q`" });
+    return;
+  }
+  try {
+    const suggestions = await suggestLocations(query);
+    res.json({ query, count: suggestions.length, suggestions });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Suggestion lookup failed";
     res.status(502).json({ error: message });
   }
 });

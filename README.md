@@ -57,3 +57,38 @@ For iOS testing, open the project with Expo Go during development or create a de
 ## Default API URL
 
 The app uses `http://localhost:4000` by default for local development. When testing on a physical iPhone, replace this with your machine LAN IP or a deployed HTTPS backend.
+
+## Location suggestions
+
+`GET /api/locations/suggest?q=<query>` powers the mobile dropdown shown while a user is typing a ZIP code or city. It is fully offline for the embedded ZIPs (no paid Google Geocoding dependency) and falls back to the free Zippopotam.us API for unfamiliar ZIPs.
+
+For ZIP queries (e.g. `60047`, `90210`, `10001`) the response includes:
+
+- a `zip` entry that searches the entire ZIP polygon,
+- a primary `city` entry resolved from the ZIP centroid (Lake Zurich, Beverly Hills, New York, …), and
+- curated `nearby` entries for towns and neighborhoods that overlap the ZIP (e.g. Long Grove, Hawthorn Woods, Kildeer, Indian Creek for 60047).
+
+For city text queries (e.g. `Lake Zurich`, `New York, NY`, `Bev`) the response is a list of matching `city` suggestions sourced from the embedded ZIP catalog. Each suggestion carries `lat`, `lng`, `label`, `city`, `state`, optional `postalCode`, `type`, and a `radiusMiles` hint that the client can pass through to `/api/pros/search`.
+
+Example:
+
+```bash
+curl "http://localhost:4000/api/locations/suggest?q=60047"
+```
+
+```json
+{
+  "query": "60047",
+  "count": 6,
+  "suggestions": [
+    { "type": "zip",    "label": "Search entire ZIP 60047 (Lake Zurich, IL)", "city": "Lake Zurich",    "state": "IL", "postalCode": "60047", "lat": 42.196, "lng": -88.0934, "radiusMiles": 6, "source": "embedded" },
+    { "type": "city",   "label": "Lake Zurich, IL",     "city": "Lake Zurich",    "state": "IL", "postalCode": "60047", "lat": 42.196, "lng": -88.0934, "radiusMiles": 8, "source": "embedded" },
+    { "type": "nearby", "label": "Long Grove, IL",      "city": "Long Grove",     "state": "IL", "postalCode": "60047", "lat": 42.182, "lng": -87.998,  "radiusMiles": 4, "source": "curated" },
+    { "type": "nearby", "label": "Hawthorn Woods, IL",  "city": "Hawthorn Woods", "state": "IL", "postalCode": "60047", "lat": 42.225, "lng": -88.044,  "radiusMiles": 4, "source": "curated" },
+    { "type": "nearby", "label": "Kildeer, IL",         "city": "Kildeer",        "state": "IL", "postalCode": "60047", "lat": 42.176, "lng": -88.046,  "radiusMiles": 4, "source": "curated" },
+    { "type": "nearby", "label": "Indian Creek, IL",    "city": "Indian Creek",   "state": "IL", "postalCode": "60047", "lat": 42.205, "lng": -87.971,  "radiusMiles": 4, "source": "curated" }
+  ]
+}
+```
+
+The existing `POST /api/pros/search` endpoint is unchanged.

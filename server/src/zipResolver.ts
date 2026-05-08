@@ -12,7 +12,7 @@ const POSTAL_CODE_REGEX = /^\s*(\d{5})(?:-\d{4})?\s*$/;
 
 // Embedded centroids for required ZIPs and a few common ones. Coordinates are
 // approximate USPS/Census centroids. Source: public USPS/Census ZIP data.
-const EMBEDDED_ZIP_CENTROIDS: Record<string, Omit<ZipCentroid, "postalCode">> = {
+export const EMBEDDED_ZIP_CENTROIDS: Record<string, Omit<ZipCentroid, "postalCode">> = {
   "60047": { lat: 42.196, lng: -88.0934, city: "Lake Zurich", state: "IL" },
   "90210": { lat: 34.0901, lng: -118.4065, city: "Beverly Hills", state: "CA" },
   "10001": { lat: 40.7506, lng: -73.9971, city: "New York", state: "NY" },
