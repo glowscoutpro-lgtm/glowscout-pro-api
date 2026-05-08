@@ -101,15 +101,18 @@ app.post("/api/pros/search", async (req, res) => {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
   try {
-    const pros = apiKey ? await searchGooglePlaces(survey, apiKey) : getDemoPros(survey);
+    const result = apiKey ? await searchGooglePlaces(survey, apiKey) : getDemoPros(survey);
     res.json({
       mode: apiKey ? "live" : "demo",
       criteria: {
         minimumRating: 4.5,
         minimumReviewCount: 10,
-        category: survey.category
+        category: survey.category,
+        maxDistanceMiles: survey.maxDistanceMiles
       },
-      pros
+      resolvedLocation: result.debug.resolvedLocation,
+      searchCenter: result.debug.searchCenter,
+      pros: result.pros
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected search error";

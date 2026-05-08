@@ -108,10 +108,35 @@ export type ProResult = {
   businessStatus?: string;
   lat?: number;
   lng?: number;
+  distanceMiles?: number;
   matchedServices: ServiceSlug[];
   estimatedCosts: ServiceEstimate[];
   reviewHighlights: string[];
   reviews: ReviewExcerpt[];
   licenseVerification: LicenseVerification;
   score: number;
+};
+
+export type ResolvedLocation = {
+  query: string;
+  formattedAddress?: string;
+  locality?: string;
+  administrativeArea?: string;
+  postalCode?: string;
+  country?: string;
+  isPostalQuery: boolean;
+  source: "geocode" | "demo" | "unresolved";
+};
+
+export type SearchCenter = {
+  lat: number;
+  lng: number;
+  radiusMiles: number;
+};
+
+export type SearchDebug = {
+  resolvedLocation: ResolvedLocation | null;
+  searchCenter: SearchCenter | null;
+  rawResultCount?: number;
+  filteredOutCount?: number;
 };

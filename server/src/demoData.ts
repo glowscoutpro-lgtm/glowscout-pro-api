@@ -3,10 +3,67 @@ import type {
   LicenseVerification,
   LicenseVerificationStatus,
   ProResult,
+  ResolvedLocation,
+  SearchCenter,
+  SearchDebug,
   ServiceCategory,
   ServiceSlug,
   SurveyPayload
 } from "./types.js";
+
+export type DemoSearchResult = {
+  pros: ProResult[];
+  debug: SearchDebug;
+};
+
+const DEFAULT_DEMO_RADIUS_MILES = 10;
+
+const DEMO_LOCATION_CENTERS: Array<{
+  matches: (loc: string) => boolean;
+  center: { lat: number; lng: number };
+  resolved: Omit<ResolvedLocation, "query" | "source">;
+}> = [
+  {
+    matches: (loc) =>
+      loc.includes("60047") ||
+      loc.includes("lake zurich") ||
+      loc.includes("long grove") ||
+      loc.includes("hawthorn woods"),
+    center: { lat: 42.196, lng: -88.0934 },
+    resolved: {
+      formattedAddress: "Lake Zurich, IL 60047, USA",
+      locality: "Lake Zurich",
+      administrativeArea: "IL",
+      postalCode: "60047",
+      country: "US",
+      isPostalQuery: true
+    }
+  },
+  {
+    matches: (loc) => loc.includes("90210") || loc.includes("beverly hills"),
+    center: { lat: 34.0901, lng: -118.4065 },
+    resolved: {
+      formattedAddress: "Beverly Hills, CA 90210, USA",
+      locality: "Beverly Hills",
+      administrativeArea: "CA",
+      postalCode: "90210",
+      country: "US",
+      isPostalQuery: true
+    }
+  },
+  {
+    matches: (loc) => loc.includes("10001"),
+    center: { lat: 40.7506, lng: -73.9971 },
+    resolved: {
+      formattedAddress: "New York, NY 10001, USA",
+      locality: "New York",
+      administrativeArea: "NY",
+      postalCode: "10001",
+      country: "US",
+      isPostalQuery: true
+    }
+  }
+];
 
 type DemoTemplate = {
   id: string;
@@ -418,7 +475,29 @@ function toPro(template: DemoTemplate, survey: SurveyPayload, services: ServiceS
   };
 }
 
-export function getDemoPros(survey: SurveyPayload): ProResult[] {
+function resolveDemoLocation(rawLocation: string): {
+  center: SearchCenter | null;
+  resolved: ResolvedLocation;
+} {
+  const normalized = rawLocation.toLowerCase();
+  const match = DEMO_LOCATION_CENTERS.find((entry) => entry.matches(normalized));
+  if (!match) {
+    return {
+      center: null,
+      resolved: {
+        query: rawLocation,
+        isPostalQuery: /^\s*\d{5}(?:-\d{4})?\s*$/.test(rawLocation),
+        source: "demo"
+      }
+    };
+  }
+  return {
+    center: { ...match.center, radiusMiles: DEFAULT_DEMO_RADIUS_MILES },
+    resolved: { query: rawLocation, source: "demo", ...match.resolved }
+  };
+}
+
+export function getDemoPros(survey: SurveyPayload): DemoSearchResult {
   const category = survey.category ?? "nails";
   const services: ServiceSlug[] =
     survey.services.length > 0 ? survey.services : DEFAULT_SERVICES_BY_CATEGORY[category];
@@ -430,40 +509,54 @@ export function getDemoPros(survey: SurveyPayload): ProResult[] {
       normalizedLocation.includes("long grove") ||
       normalizedLocation.includes("hawthorn woods"));
 
+  const { center, resolved } = resolveDemoLocation(survey.location);
+  const debug: SearchDebug = {
+    resolvedLocation: resolved,
+    searchCenter: center
+  };
+
   const defaultPros = DEMO_PROS_BY_CATEGORY[category].map((template, index) =>
     toPro(template, survey, services, index)
   );
 
   if (!shouldFeatureElina) {
-    return defaultPros;
+    return { pros: defaultPros, debug };
   }
 
-  return [
-    {
-      id: "demo-elina-60047",
-      name: "Elina Nail Studio",
-      address: "291 S Rand Road, Lake Zurich, IL 60047 · Demo listing",
-      rating: 4.9,
-      reviewCount: 28,
-      phone: "(847) 970-0072",
-      website: "https://nailstudiobyelina.com",
-      googleMapsUri:
-        "https://maps.google.com/?q=Elina%20Nail%20Studio%20291%20S%20Rand%20Road%20Lake%20Zurich%20IL%2060047",
-      priceLevel: "PRICE_LEVEL_MODERATE",
-      businessStatus: "OPERATIONAL",
-      matchedServices: services,
-      estimatedCosts: estimateCosts(services, "PRICE_LEVEL_MODERATE"),
-      reviewHighlights: [
-        "Demo mode: pro-submitted license details matched the state lookup record.",
-        "Strong fit for Russian manicure, structured gel, dry pedicure, and private studio preferences."
-      ],
-      reviews: demoReviews("Elina Nail Studio"),
-      licenseVerification: buildLicenseVerification("state_verified", "nails", "Lake Zurich, IL 60047"),
-      score: 99
-    },
-    ...defaultPros.map((pro) => ({
-      ...pro,
-      address: pro.address.replace(survey.location || "Your city", "Lake Zurich, IL")
-    }))
-  ];
+  const elina: ProResult = {
+    id: "demo-elina-60047",
+    name: "Elina Nail Studio",
+    address: "291 S Rand Road, Lake Zurich, IL 60047 · Demo listing",
+    rating: 4.9,
+    reviewCount: 28,
+    phone: "(847) 970-0072",
+    website: "https://nailstudiobyelina.com",
+    googleMapsUri:
+      "https://maps.google.com/?q=Elina%20Nail%20Studio%20291%20S%20Rand%20Road%20Lake%20Zurich%20IL%2060047",
+    priceLevel: "PRICE_LEVEL_MODERATE",
+    businessStatus: "OPERATIONAL",
+    lat: 42.1969,
+    lng: -88.0925,
+    distanceMiles: 0.1,
+    matchedServices: services,
+    estimatedCosts: estimateCosts(services, "PRICE_LEVEL_MODERATE"),
+    reviewHighlights: [
+      "Demo mode: pro-submitted license details matched the state lookup record.",
+      "Strong fit for Russian manicure, structured gel, dry pedicure, and private studio preferences."
+    ],
+    reviews: demoReviews("Elina Nail Studio"),
+    licenseVerification: buildLicenseVerification("state_verified", "nails", "Lake Zurich, IL 60047"),
+    score: 99
+  };
+
+  return {
+    pros: [
+      elina,
+      ...defaultPros.map((pro) => ({
+        ...pro,
+        address: pro.address.replace(survey.location || "Your city", "Lake Zurich, IL")
+      }))
+    ],
+    debug
+  };
 }

@@ -2,7 +2,10 @@ import { estimateCosts } from "./pricing.js";
 import type {
   LicenseVerification,
   ProResult,
+  ResolvedLocation,
   ReviewExcerpt,
+  SearchCenter,
+  SearchDebug,
   ServiceCategory,
   ServiceSlug,
   SurveyPayload
@@ -42,8 +45,11 @@ type GoogleTextSearchResponse = {
 type GeocodeResult = {
   lat: number;
   lng: number;
+  formattedAddress?: string;
   locality?: string;
+  administrativeArea?: string;
   postalCode?: string;
+  country?: string;
   isPostalQuery: boolean;
 };
 
@@ -124,6 +130,11 @@ const SERVICE_TERMS: Record<ServiceSlug, string> = {
   "holistic-facial": "holistic facial"
 };
 
+export type SearchResult = {
+  pros: ProResult[];
+  debug: SearchDebug;
+};
+
 function buildServiceQuery(survey: SurveyPayload): string {
   const categoryTerm = CATEGORY_TERMS[survey.category] ?? CATEGORY_TERMS.nails;
   const selectedTerms = survey.services.map((service) => SERVICE_TERMS[service]).filter(Boolean);
@@ -190,12 +201,12 @@ function isPostalQuery(input: string): boolean {
   return POSTAL_CODE_REGEX.test(input);
 }
 
-function normalizeLocality(value?: string): string | undefined {
+function normalize(value?: string): string | undefined {
   if (!value) return undefined;
   return value.trim().toLowerCase();
 }
 
-function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
@@ -225,6 +236,7 @@ async function geocodeLocation(location: string, apiKey: string): Promise<Geocod
   const data = (await response.json()) as {
     status?: string;
     results?: Array<{
+      formatted_address?: string;
       geometry?: { location?: { lat?: number; lng?: number } };
       address_components?: Array<{ long_name?: string; short_name?: string; types?: string[] }>;
     }>;
@@ -247,28 +259,45 @@ async function geocodeLocation(location: string, apiKey: string): Promise<Geocod
     ?? components.find((c) => c.types?.includes("sublocality"))
     ?? components.find((c) => c.types?.includes("administrative_area_level_3"));
   const postalComponent = components.find((c) => c.types?.includes("postal_code"));
+  const adminComponent = components.find((c) => c.types?.includes("administrative_area_level_1"));
+  const countryComponent = components.find((c) => c.types?.includes("country"));
 
   return {
     lat,
     lng,
+    formattedAddress: top.formatted_address,
     locality: localityComponent?.long_name ?? localityComponent?.short_name,
+    administrativeArea: adminComponent?.short_name ?? adminComponent?.long_name,
     postalCode: postalComponent?.long_name ?? postalComponent?.short_name,
+    country: countryComponent?.short_name ?? countryComponent?.long_name,
     isPostalQuery: isPostalQuery(location)
   };
 }
 
 function placeMatchesLocality(place: GooglePlace, locality: string): boolean {
-  const target = normalizeLocality(locality);
+  const target = normalize(locality);
   if (!target) return true;
   const components = place.addressComponents ?? [];
   return components.some((component) => {
     if (!component.types?.some((t) => t === "locality" || t === "postal_town" || t === "sublocality")) {
       return false;
     }
-    const long = normalizeLocality(component.longText);
-    const short = normalizeLocality(component.shortText);
+    const long = normalize(component.longText);
+    const short = normalize(component.shortText);
     return long === target || short === target;
   });
+}
+
+function placeAdminArea(place: GooglePlace): string | undefined {
+  const components = place.addressComponents ?? [];
+  const admin = components.find((c) => c.types?.includes("administrative_area_level_1"));
+  return admin?.shortText ?? admin?.longText;
+}
+
+function placePostalCode(place: GooglePlace): string | undefined {
+  const components = place.addressComponents ?? [];
+  const postal = components.find((c) => c.types?.includes("postal_code"));
+  return postal?.longText ?? postal?.shortText;
 }
 
 function clampDistanceMiles(value: number | undefined): number {
@@ -281,6 +310,7 @@ function clampDistanceMiles(value: number | undefined): number {
 async function callPlacesTextSearch(
   apiKey: string,
   textQuery: string,
+  locationRestriction?: { latitude: number; longitude: number; radiusMeters: number },
   locationBias?: { latitude: number; longitude: number; radiusMeters: number }
 ): Promise<GooglePlace[]> {
   const body: Record<string, unknown> = {
@@ -290,7 +320,14 @@ async function callPlacesTextSearch(
     includePureServiceAreaBusinesses: true
   };
 
-  if (locationBias) {
+  if (locationRestriction) {
+    body.locationRestriction = {
+      circle: {
+        center: { latitude: locationRestriction.latitude, longitude: locationRestriction.longitude },
+        radius: locationRestriction.radiusMeters
+      }
+    };
+  } else if (locationBias) {
     body.locationBias = {
       circle: {
         center: { latitude: locationBias.latitude, longitude: locationBias.longitude },
@@ -332,7 +369,7 @@ async function callPlacesTextSearch(
   return data.places ?? [];
 }
 
-function mapPlaceToProResult(place: GooglePlace, survey: SurveyPayload): ProResult {
+function mapPlaceToProResult(place: GooglePlace, survey: SurveyPayload, distanceMiles?: number): ProResult {
   return {
     id: place.id ?? crypto.randomUUID(),
     name: place.displayName?.text ?? "Unnamed beauty pro",
@@ -346,6 +383,10 @@ function mapPlaceToProResult(place: GooglePlace, survey: SurveyPayload): ProResu
     businessStatus: place.businessStatus,
     lat: place.location?.latitude,
     lng: place.location?.longitude,
+    distanceMiles:
+      typeof distanceMiles === "number" && Number.isFinite(distanceMiles)
+        ? Math.round(distanceMiles * 100) / 100
+        : undefined,
     matchedServices: survey.services,
     estimatedCosts: estimateCosts(survey.services, place.priceLevel),
     reviewHighlights: reviewHighlights(place),
@@ -359,48 +400,133 @@ function passesQualityFilters(place: GooglePlace): boolean {
   return (place.rating ?? 0) >= MIN_RATING && (place.userRatingCount ?? 0) >= MIN_REVIEW_COUNT;
 }
 
-export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string): Promise<ProResult[]> {
+function buildResolvedLocation(query: string, geocode: GeocodeResult | null): ResolvedLocation | null {
+  if (!geocode) {
+    return {
+      query,
+      isPostalQuery: isPostalQuery(query),
+      source: "unresolved"
+    };
+  }
+  return {
+    query,
+    formattedAddress: geocode.formattedAddress,
+    locality: geocode.locality,
+    administrativeArea: geocode.administrativeArea,
+    postalCode: geocode.postalCode,
+    country: geocode.country,
+    isPostalQuery: geocode.isPostalQuery,
+    source: "geocode"
+  };
+}
+
+export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string): Promise<SearchResult> {
   const baseQuery = buildServiceQuery(survey);
-  const textQueryWithLocation = `${baseQuery} near ${survey.location}`;
   const maxDistanceMiles = clampDistanceMiles(survey.maxDistanceMiles);
+  const radiusMeters = Math.min(
+    maxDistanceMiles * METERS_PER_MILE,
+    ABSOLUTE_MAX_DISTANCE_MILES * METERS_PER_MILE
+  );
 
   const geocode = await geocodeLocation(survey.location, apiKey);
+  const resolvedLocation = buildResolvedLocation(survey.location, geocode);
 
   if (!geocode) {
+    const textQueryWithLocation = `${baseQuery} near ${survey.location}`;
     const places = await callPlacesTextSearch(apiKey, textQueryWithLocation);
-    return places
+    const pros = places
       .filter(passesQualityFilters)
       .map((place) => mapPlaceToProResult(place, survey))
       .sort((a, b) => b.score - a.score);
+    return {
+      pros,
+      debug: {
+        resolvedLocation,
+        searchCenter: null,
+        rawResultCount: places.length,
+        filteredOutCount: places.length - pros.length
+      }
+    };
   }
 
-  const radiusMeters = Math.min(maxDistanceMiles * METERS_PER_MILE, ABSOLUTE_MAX_DISTANCE_MILES * METERS_PER_MILE);
-  const places = await callPlacesTextSearch(apiKey, textQueryWithLocation, {
-    latitude: geocode.lat,
-    longitude: geocode.lng,
-    radiusMeters
-  });
+  const searchCenter: SearchCenter = {
+    lat: geocode.lat,
+    lng: geocode.lng,
+    radiusMiles: maxDistanceMiles
+  };
 
-  const withinRadius = places.filter((place) => {
-    if (!passesQualityFilters(place)) return false;
-    const lat = place.location?.latitude;
-    const lng = place.location?.longitude;
-    if (typeof lat !== "number" || typeof lng !== "number") return false;
-    const distance = haversineMiles(geocode.lat, geocode.lng, lat, lng);
-    return distance <= maxDistanceMiles;
-  });
+  const textQueryWithLocation = formatQueryWithGeocode(baseQuery, geocode, survey.location);
+
+  const places = await callPlacesTextSearch(
+    apiKey,
+    textQueryWithLocation,
+    { latitude: geocode.lat, longitude: geocode.lng, radiusMeters },
+    { latitude: geocode.lat, longitude: geocode.lng, radiusMeters }
+  );
 
   const treatAsPostal = geocode.isPostalQuery || isPostalQuery(survey.location);
 
-  let filtered: GooglePlace[];
-  if (treatAsPostal || !geocode.locality) {
-    filtered = withinRadius;
-  } else {
-    const localityMatches = withinRadius.filter((place) => placeMatchesLocality(place, geocode.locality!));
-    filtered = localityMatches.length >= MIN_RESULTS_BEFORE_FALLBACK ? localityMatches : withinRadius;
+  type Annotated = { place: GooglePlace; distance: number };
+  const annotated: Annotated[] = [];
+  for (const place of places) {
+    if (!passesQualityFilters(place)) continue;
+    const lat = place.location?.latitude;
+    const lng = place.location?.longitude;
+    if (typeof lat !== "number" || typeof lng !== "number") continue;
+    const distance = haversineMiles(geocode.lat, geocode.lng, lat, lng);
+    if (distance > maxDistanceMiles) continue;
+    annotated.push({ place, distance });
   }
 
-  return filtered
-    .map((place) => mapPlaceToProResult(place, survey))
+  let filtered: Annotated[] = annotated;
+
+  if (geocode.administrativeArea) {
+    const adminTarget = normalize(geocode.administrativeArea);
+    const adminMatches = annotated.filter((entry) => {
+      const placeAdmin = normalize(placeAdminArea(entry.place));
+      return placeAdmin && placeAdmin === adminTarget;
+    });
+    if (adminMatches.length > 0 && adminMatches.length < annotated.length) {
+      filtered = adminMatches;
+    }
+  }
+
+  if (treatAsPostal && geocode.postalCode) {
+    const postalTarget = normalize(geocode.postalCode);
+    const postalMatches = filtered.filter((entry) => {
+      const placePostal = normalize(placePostalCode(entry.place));
+      return placePostal && placePostal === postalTarget;
+    });
+    if (postalMatches.length >= MIN_RESULTS_BEFORE_FALLBACK) {
+      filtered = postalMatches;
+    }
+  } else if (geocode.locality) {
+    const localityMatches = filtered.filter((entry) =>
+      placeMatchesLocality(entry.place, geocode.locality!)
+    );
+    if (localityMatches.length >= MIN_RESULTS_BEFORE_FALLBACK) {
+      filtered = localityMatches;
+    }
+  }
+
+  const pros = filtered
+    .map(({ place, distance }) => mapPlaceToProResult(place, survey, distance))
     .sort((a, b) => b.score - a.score);
+
+  return {
+    pros,
+    debug: {
+      resolvedLocation,
+      searchCenter,
+      rawResultCount: places.length,
+      filteredOutCount: places.length - pros.length
+    }
+  };
+}
+
+function formatQueryWithGeocode(baseQuery: string, geocode: GeocodeResult, originalLocation: string): string {
+  const locationParts = [geocode.locality, geocode.administrativeArea, geocode.postalCode]
+    .filter((part): part is string => Boolean(part && part.trim().length > 0));
+  const locationLabel = locationParts.length > 0 ? locationParts.join(", ") : originalLocation;
+  return `${baseQuery} near ${locationLabel}`;
 }
