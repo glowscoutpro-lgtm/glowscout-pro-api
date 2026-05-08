@@ -12,7 +12,7 @@ export type LocationSuggestion = {
   lat: number;
   lng: number;
   radiusMiles: number;
-  source: "embedded" | "zippopotam" | "curated" | "google";
+  source: "embedded" | "zippopotam" | "curated" | "google" | "google_places";
 };
 
 type NearbyEntry = {
@@ -344,8 +344,220 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
     return [];
   }
 
+  // Prefer Places API Text Search: it uses the same Places capability the
+  // provider search already relies on, so it works even when the project has
+  // not enabled the separate Geocoding API. Fall back to Geocoding only if
+  // Places returns nothing usable.
+  const placesHits = await placesCityFallback(cityQuery, state, apiKey);
+  if (placesHits.length > 0) {
+    return placesHits.slice(0, MAX_CITY_SUGGESTIONS);
+  }
+
   const geocoded = await geocodeCityFallback(cityQuery, state, apiKey);
   return geocoded ? [geocoded] : [];
+}
+
+type PlacesAddressComponent = {
+  longText?: string;
+  shortText?: string;
+  types?: string[];
+};
+
+type PlacesPlace = {
+  id?: string;
+  formattedAddress?: string;
+  displayName?: { text?: string };
+  location?: { latitude?: number; longitude?: number };
+  types?: string[];
+  primaryType?: string;
+  addressComponents?: PlacesAddressComponent[];
+};
+
+type PlacesTextSearchResponse = {
+  places?: PlacesPlace[];
+};
+
+const PLACES_CACHE = new Map<string, LocationSuggestion[]>();
+const PLACES_TIMEOUT_MS = 3000;
+
+export function _resetPlacesCacheForTests(): void {
+  PLACES_CACHE.clear();
+}
+
+const LOCALITY_TYPE_PRIORITY = [
+  "locality",
+  "postal_town",
+  "administrative_area_level_3",
+  "administrative_area_level_2",
+  "sublocality"
+];
+
+function isLocalityPlace(place: PlacesPlace): boolean {
+  const types = new Set([place.primaryType, ...(place.types ?? [])].filter(Boolean) as string[]);
+  return LOCALITY_TYPE_PRIORITY.some((t) => types.has(t));
+}
+
+function findComponent(
+  components: PlacesAddressComponent[],
+  type: string
+): PlacesAddressComponent | undefined {
+  return components.find((c) => c.types?.includes(type));
+}
+
+function placeToCitySuggestion(place: PlacesPlace): LocationSuggestion | null {
+  const components = place.addressComponents ?? [];
+  const country = findComponent(components, "country");
+  const countryCode = country?.shortText ?? country?.longText;
+  if (countryCode && countryCode !== "US") return null;
+
+  const localityComp =
+    findComponent(components, "locality") ??
+    findComponent(components, "postal_town") ??
+    findComponent(components, "administrative_area_level_3") ??
+    findComponent(components, "administrative_area_level_2");
+  const adminComp = findComponent(components, "administrative_area_level_1");
+  const postalComp = findComponent(components, "postal_code");
+
+  const cityName =
+    localityComp?.longText ?? localityComp?.shortText ?? place.displayName?.text;
+  const stateAbbr = adminComp?.shortText ?? adminComp?.longText;
+  const lat = place.location?.latitude;
+  const lng = place.location?.longitude;
+  if (!cityName || !stateAbbr) return null;
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+
+  return {
+    type: "city",
+    label: `${cityName}, ${stateAbbr}`,
+    city: cityName,
+    state: stateAbbr,
+    postalCode: postalComp?.longText ?? postalComp?.shortText,
+    lat,
+    lng,
+    radiusMiles: cityRadiusMiles(stateAbbr),
+    source: "google_places"
+  };
+}
+
+async function placesCityFallback(
+  cityQuery: string,
+  state: string | undefined,
+  apiKey: string
+): Promise<LocationSuggestion[]> {
+  const textQuery = state ? `${cityQuery}, ${state}, USA` : `${cityQuery}, USA`;
+  const cacheKey = textQuery.toLowerCase();
+  const cached = PLACES_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PLACES_TIMEOUT_MS);
+  let data: PlacesTextSearchResponse;
+  try {
+    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        // Restrict the field mask so we are billed for the cheaper
+        // Places Text Search SKU and only get the fields we need to
+        // build a city suggestion.
+        "X-Goog-FieldMask": [
+          "places.id",
+          "places.displayName",
+          "places.formattedAddress",
+          "places.location",
+          "places.types",
+          "places.primaryType",
+          "places.addressComponents"
+        ].join(",")
+      },
+      body: JSON.stringify({
+        textQuery,
+        // Bias toward localities; some queries still come back as
+        // establishments (the historic fort) so we filter on results.
+        includedType: "locality",
+        // Restrict the search to US results so unrelated foreign matches
+        // (e.g. Saint Augustine, Trinidad) cannot win.
+        regionCode: "US",
+        maxResultCount: 10
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      // 400 with `includedType` rejection (older project configs) — retry
+      // without the type bias and rely on post-filtering.
+      if (response.status === 400) {
+        const retry = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": apiKey,
+            "X-Goog-FieldMask": [
+              "places.id",
+              "places.displayName",
+              "places.formattedAddress",
+              "places.location",
+              "places.types",
+              "places.primaryType",
+              "places.addressComponents"
+            ].join(",")
+          },
+          body: JSON.stringify({ textQuery, regionCode: "US", maxResultCount: 10 }),
+          signal: controller.signal
+        });
+        if (!retry.ok) {
+          PLACES_CACHE.set(cacheKey, []);
+          return [];
+        }
+        data = (await retry.json()) as PlacesTextSearchResponse;
+      } else {
+        PLACES_CACHE.set(cacheKey, []);
+        return [];
+      }
+    } else {
+      data = (await response.json()) as PlacesTextSearchResponse;
+    }
+  } catch {
+    PLACES_CACHE.set(cacheKey, []);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const places = data.places ?? [];
+  const suggestions: LocationSuggestion[] = [];
+  const seen = new Set<string>();
+
+  // Only keep results that look like a locality so we don't surface
+  // landmarks ("Castillo de San Marcos") as if they were cities.
+  for (const place of places) {
+    if (!isLocalityPlace(place)) continue;
+    const suggestion = placeToCitySuggestion(place);
+    if (!suggestion) continue;
+    if (state && suggestion.state !== state) continue;
+    const dedupeKey = `${suggestion.city.toLowerCase()}|${suggestion.state}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    suggestions.push(suggestion);
+  }
+
+  // If the type filter eliminated everything, retry by parsing whatever the
+  // API returned — sometimes a city resolves as an establishment but its
+  // addressComponents still expose locality/state.
+  if (suggestions.length === 0) {
+    for (const place of places) {
+      const suggestion = placeToCitySuggestion(place);
+      if (!suggestion) continue;
+      if (state && suggestion.state !== state) continue;
+      const dedupeKey = `${suggestion.city.toLowerCase()}|${suggestion.state}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      suggestions.push(suggestion);
+    }
+  }
+
+  PLACES_CACHE.set(cacheKey, suggestions);
+  return suggestions;
 }
 
 type GeocodeAddressComponent = {
