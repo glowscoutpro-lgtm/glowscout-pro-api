@@ -167,6 +167,49 @@ const cases: Case[] = [
       surveyType: "garbage"
     },
     expectValid: false
+  },
+  {
+    name: "currentSearchMethods + trustSignals arrays validate",
+    input: {
+      surveyType: "consumer_beta",
+      currentSearchMethods: ["instagram", "google", "yelp"],
+      currentSearchMethodOther: "ask my hairdresser",
+      trustSignals: ["reviews", "before-after-photos", "verified-license"],
+      trustSignalOther: "personal referral",
+      bookingConfidenceFactor: "clear pricing and recent reviews"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      currentSearchMethodOther: "ask my hairdresser",
+      trustSignalOther: "personal referral",
+      bookingConfidenceFactor: "clear pricing and recent reviews"
+    }
+  },
+  {
+    name: "empty arrays for new fields validate",
+    input: {
+      surveyType: "consumer_beta",
+      currentSearchMethods: [],
+      trustSignals: []
+    },
+    expectValid: true
+  },
+  {
+    name: "currentSearchMethods over max length rejected",
+    input: {
+      surveyType: "consumer_beta",
+      currentSearchMethods: Array.from({ length: 21 }, (_, i) => `method-${i}`)
+    },
+    expectValid: false
+  },
+  {
+    name: "non-array currentSearchMethods rejected",
+    input: {
+      surveyType: "consumer_beta",
+      currentSearchMethods: "instagram"
+    },
+    expectValid: false
   }
 ];
 

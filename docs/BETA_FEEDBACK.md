@@ -29,6 +29,11 @@ Body fields (all optional except `surveyType`):
 | `confusingPart` | string | |
 | `missingFeature` | string | |
 | `fixFirst` | string | |
+| `currentSearchMethods` | string[] (max 20) | Family/friends beta: how testers currently search for beauty/wellness pros (e.g. `instagram`, `google`, `yelp`) |
+| `currentSearchMethodOther` | string | Free-text "other" entry for `currentSearchMethods` |
+| `trustSignals` | string[] (max 20) | Family/friends beta: signals that make a professional trustworthy (e.g. `reviews`, `before-after-photos`, `verified-license`) |
+| `trustSignalOther` | string | Free-text "other" entry for `trustSignals` |
+| `bookingConfidenceFactor` | string | Family/friends beta: what would make the tester confident enough to book |
 | `profession` | string | Professional survey |
 | `offersMobileService` | boolean | Professional survey |
 | `privateStudio` | boolean | Professional survey |

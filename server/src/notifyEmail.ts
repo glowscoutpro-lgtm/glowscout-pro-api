@@ -6,6 +6,7 @@ const DEFAULT_FROM = "GlowScout Feedback <onboarding@resend.dev>";
 function formatValue(value: unknown): string {
   if (value === undefined || value === null || value === "") return "—";
   if (typeof value === "boolean") return value ? "yes" : "no";
+  if (Array.isArray(value)) return value.length === 0 ? "—" : value.join(", ");
   return String(value);
 }
 
@@ -28,6 +29,8 @@ export function buildFeedbackEmail(record: StoredFeedback): { subject: string; t
     ["License verification helpful", record.licenseVerificationHelpful],
     ["Would add pricing", record.wouldAddPricing],
     ["Would pay for enhanced profile", record.wouldPayForEnhancedProfile],
+    ["Current search methods", record.currentSearchMethods],
+    ["Trust signals", record.trustSignals],
     ["Tester role", record.testerRole],
     ["Can contact", record.canContact],
     ["Name", record.name],
@@ -41,6 +44,9 @@ export function buildFeedbackEmail(record: StoredFeedback): { subject: string; t
     ["Confusing part", record.confusingPart],
     ["Missing feature", record.missingFeature],
     ["Fix first", record.fixFirst],
+    ["Current search method (other)", record.currentSearchMethodOther],
+    ["Trust signal (other)", record.trustSignalOther],
+    ["Booking confidence factor", record.bookingConfidenceFactor],
     ["Business value", record.businessValue],
     ["Concerns", record.concerns]
   ];

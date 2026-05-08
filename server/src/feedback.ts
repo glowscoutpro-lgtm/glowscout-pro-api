@@ -10,6 +10,11 @@ const sentimentOrRatingField = z
   .union([sentimentEnum, z.coerce.number().min(0).max(5)])
   .optional();
 
+const shortTagArray = z
+  .array(z.string().trim().min(1).max(120))
+  .max(20)
+  .optional();
+
 const baseSchema = z.object({
   surveyType: z.enum(["consumer_beta", "professional_beta"]),
   name: z.string().trim().max(120).optional(),
@@ -25,6 +30,11 @@ const baseSchema = z.object({
   confusingPart: z.string().trim().max(4000).optional(),
   missingFeature: z.string().trim().max(4000).optional(),
   fixFirst: z.string().trim().max(4000).optional(),
+  currentSearchMethods: shortTagArray,
+  currentSearchMethodOther: z.string().trim().max(4000).optional(),
+  trustSignals: shortTagArray,
+  trustSignalOther: z.string().trim().max(4000).optional(),
+  bookingConfidenceFactor: z.string().trim().max(4000).optional(),
   profession: z.string().trim().max(120).optional(),
   offersMobileService: z.boolean().optional(),
   privateStudio: z.boolean().optional(),
