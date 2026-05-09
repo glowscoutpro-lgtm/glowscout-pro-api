@@ -44,7 +44,13 @@ Body fields (all optional except `surveyType`):
 | `businessValue` | string | Professional survey |
 | `concerns` | string | Professional survey |
 | `appVersion` | string | |
+| `appBuild` | string | Optional build number, e.g. "9" |
 | `platform` | string | e.g. "ios" |
+| `deviceModel` | string | Optional, e.g. "iPhone 15 Pro" |
+| `osVersion` | string | Optional, e.g. "iOS 18.2" |
+| `searchLocation` | string | Optional last-search location label |
+| `searchCategory` | string | Optional last-search category |
+| `searchContext` | string | Optional free-form context (e.g. recent query) |
 
 Responses:
 
@@ -64,16 +70,35 @@ The submitter's IP is not stored in plaintext: a 16-char SHA-256 prefix using
 
 ## Retrieving feedback (admin)
 
-Set `ADMIN_TOKEN` to a long random string. Then:
+Set `FEEDBACK_ADMIN_TOKEN` to a long random string in Render → Environment.
+(`ADMIN_TOKEN` is still accepted as a fallback for backwards compatibility.)
 
-```http
-GET /api/feedback?limit=500
-x-admin-token: <ADMIN_TOKEN>
+Three private admin entry points are available — all reject requests when the
+token env var is unset (`503 Admin endpoint not configured`) and when the
+provided token does not match (`401 Unauthorized`):
+
+| Path | Use | Format |
+|---|---|---|
+| `GET /admin/feedback?token=<TOKEN>` | Browser viewer for quick review | HTML |
+| `GET /api/feedback?token=<TOKEN>` | Programmatic access / scripts | JSON |
+| `GET /api/feedback.csv?token=<TOKEN>` | One-click spreadsheet export | CSV |
+
+All three accept the token in any of three ways:
+
+- `?token=<TOKEN>` query string (handy for the browser viewer)
+- `x-admin-token: <TOKEN>` header
+- `Authorization: Bearer <TOKEN>` header
+
+Optional `?limit=<n>` controls how many of the most recent submissions to
+return (default 500, max 5000).
+
+Example URLs (replace `glowscout-pro-api.onrender.com` with your Render URL):
+
+```text
+https://glowscout-pro-api.onrender.com/admin/feedback?token=YOUR_TOKEN
+https://glowscout-pro-api.onrender.com/api/feedback?token=YOUR_TOKEN
+https://glowscout-pro-api.onrender.com/api/feedback.csv?token=YOUR_TOKEN
 ```
-
-Or `Authorization: Bearer <ADMIN_TOKEN>`. Returns
-`{ count, items: StoredFeedback[] }`. If `ADMIN_TOKEN` is unset the endpoint
-returns `503` to keep responses private by default.
 
 For ad-hoc retrieval, you can also `cat` the JSONL file directly on the
 server:

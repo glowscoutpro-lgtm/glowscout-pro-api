@@ -16,6 +16,8 @@ services:
         sync: false
       - key: ADMIN_TOKEN
         sync: false
+      - key: FEEDBACK_ADMIN_TOKEN
+        sync: false
       - key: FEEDBACK_IP_SALT
         sync: false
       - key: RESEND_API_KEY

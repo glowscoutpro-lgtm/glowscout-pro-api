@@ -210,6 +210,26 @@ const cases: Case[] = [
       currentSearchMethods: "instagram"
     },
     expectValid: false
+  },
+  {
+    name: "device + search context fields validate",
+    input: {
+      surveyType: "consumer_beta",
+      appVersion: "1.0.0",
+      appBuild: "9",
+      platform: "ios",
+      deviceModel: "iPhone 15 Pro",
+      osVersion: "18.2",
+      searchLocation: "Lake Zurich, IL",
+      searchCategory: "nails",
+      searchContext: "looking for russian manicure under $85"
+    },
+    expectValid: true,
+    expectFields: {
+      appBuild: "9",
+      deviceModel: "iPhone 15 Pro",
+      searchLocation: "Lake Zurich, IL"
+    }
   }
 ];
 

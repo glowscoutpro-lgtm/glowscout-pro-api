@@ -45,7 +45,13 @@ const baseSchema = z.object({
   businessValue: z.string().trim().max(4000).optional(),
   concerns: z.string().trim().max(4000).optional(),
   appVersion: z.string().trim().max(40).optional(),
-  platform: z.string().trim().max(40).optional()
+  appBuild: z.string().trim().max(40).optional(),
+  platform: z.string().trim().max(40).optional(),
+  deviceModel: z.string().trim().max(120).optional(),
+  osVersion: z.string().trim().max(40).optional(),
+  searchLocation: z.string().trim().max(200).optional(),
+  searchCategory: z.string().trim().max(60).optional(),
+  searchContext: z.string().trim().max(2000).optional()
 });
 
 export const feedbackSchema = baseSchema.strict();
