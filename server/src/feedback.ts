@@ -54,7 +54,7 @@ const baseSchema = z.object({
   searchContext: z.string().trim().max(2000).optional()
 });
 
-export const feedbackSchema = baseSchema.strict();
+export const feedbackSchema = baseSchema.passthrough();
 
 export type FeedbackPayload = z.infer<typeof feedbackSchema>;
 
@@ -70,15 +70,31 @@ const SURVEY_TYPE_ALIASES: Record<string, "consumer_beta" | "professional_beta">
   beta: "consumer_beta",
   consumer: "consumer_beta",
   consumer_beta: "consumer_beta",
+  consumerbeta: "consumer_beta",
+  family: "consumer_beta",
+  friend: "consumer_beta",
+  friends: "consumer_beta",
+  friend_family: "consumer_beta",
+  friends_family: "consumer_beta",
+  family_friends: "consumer_beta",
+  friendsfamily: "consumer_beta",
+  friendsandfamily: "consumer_beta",
   pro: "professional_beta",
   professional: "professional_beta",
-  professional_beta: "professional_beta"
+  professional_beta: "professional_beta",
+  professionalbeta: "professional_beta"
 };
 
-function normalizeSurveyType(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const key = value.trim().toLowerCase();
-  return SURVEY_TYPE_ALIASES[key] ?? value;
+const DEFAULT_SURVEY_TYPE: "consumer_beta" = "consumer_beta";
+
+function normalizeSurveyType(value: unknown): "consumer_beta" | "professional_beta" {
+  if (typeof value !== "string") return DEFAULT_SURVEY_TYPE;
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (SURVEY_TYPE_ALIASES[key]) return SURVEY_TYPE_ALIASES[key];
+  const collapsed = key.replace(/_/g, "");
+  if (SURVEY_TYPE_ALIASES[collapsed]) return SURVEY_TYPE_ALIASES[collapsed];
+  if (key.includes("pro")) return "professional_beta";
+  return DEFAULT_SURVEY_TYPE;
 }
 
 export function normalizeFeedbackPayload(input: unknown): unknown {
@@ -93,6 +109,9 @@ export function normalizeFeedbackPayload(input: unknown): unknown {
       continue;
     }
     normalized[canonical] = canonical === "surveyType" ? normalizeSurveyType(value) : value;
+  }
+  if (typeof normalized.surveyType !== "string") {
+    normalized.surveyType = DEFAULT_SURVEY_TYPE;
   }
   return normalized;
 }

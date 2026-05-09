@@ -77,19 +77,27 @@ const cases: Case[] = [
     }
   },
   {
-    name: "missing surveyType still fails validation",
+    name: "missing surveyType defaults to consumer_beta",
     input: {
       searchResultsUseful: "yes"
     },
-    expectValid: false
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      searchQuality: "yes"
+    }
   },
   {
-    name: "unknown extra field still rejected after normalization",
+    name: "unknown extra field is preserved (passthrough)",
     input: {
       type: "consumer_beta",
       bogusField: "x"
     },
-    expectValid: false
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      bogusField: "x"
+    }
   },
   {
     name: "numeric rating preserved",
@@ -162,11 +170,113 @@ const cases: Case[] = [
     }
   },
   {
-    name: "unknown surveyType value still rejected",
+    name: "unknown surveyType value falls back to consumer_beta",
     input: {
       surveyType: "garbage"
     },
-    expectValid: false
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta"
+    }
+  },
+  {
+    name: "surveyType 'friend_family' normalizes to consumer_beta",
+    input: {
+      surveyType: "friend_family",
+      likedMost: "test from family"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      likedMost: "test from family"
+    }
+  },
+  {
+    name: "type 'friend_family' alias normalizes to consumer_beta",
+    input: {
+      type: "friend_family"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta"
+    }
+  },
+  {
+    name: "surveyType 'Friends & Family' normalizes to consumer_beta",
+    input: {
+      surveyType: "Friends & Family"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta"
+    }
+  },
+  {
+    name: "build 12-style payload with extra app fields validates",
+    input: {
+      type: "beta",
+      searchResultsUseful: "yes",
+      resultsTrustworthy: "somewhat",
+      confusing: "the map controls",
+      missing: "filter by price",
+      currentSearchMethods: ["instagram", "google"],
+      trustSignals: ["reviews", "verified-license"],
+      bookingConfidenceFactor: "clear pricing",
+      appBuild: "12",
+      platform: "ios",
+      sessionId: "abc-123",
+      submittedFromScreen: "FeedbackModal"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      searchQuality: "yes",
+      trustResults: "somewhat",
+      confusingPart: "the map controls",
+      missingFeature: "filter by price",
+      bookingConfidenceFactor: "clear pricing",
+      appBuild: "12",
+      sessionId: "abc-123"
+    }
+  },
+  {
+    name: "build 15-style payload with friend_family and extras validates",
+    input: {
+      surveyType: "friend_family",
+      name: "Frank Carabetta",
+      email: "fcarabetta@italiafoods.com",
+      canContact: true,
+      searchResultsUseful: 4,
+      resultsTrustworthy: 5,
+      confusing: "nothing major",
+      missing: "appointment booking",
+      likedMost: "fast results",
+      fixFirst: "make pricing clearer",
+      appVersion: "1.0.0",
+      appBuild: "15",
+      platform: "ios",
+      deviceModel: "iPhone 15 Pro",
+      osVersion: "18.2",
+      searchLocation: "Lake Zurich, IL",
+      searchCategory: "nails"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      email: "fcarabetta@italiafoods.com",
+      searchQuality: 4,
+      trustResults: 5,
+      missingFeature: "appointment booking",
+      appBuild: "15"
+    }
+  },
+  {
+    name: "completely empty body defaults to consumer_beta",
+    input: {},
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta"
+    }
   },
   {
     name: "currentSearchMethods + trustSignals arrays validate",
