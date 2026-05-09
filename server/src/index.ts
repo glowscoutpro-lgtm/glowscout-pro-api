@@ -84,7 +84,21 @@ const surveySchema = z.object({
   budget: z.enum(["under-50", "50-85", "85-125", "125-plus"]).optional(),
   maxDistanceMiles: z.coerce.number().min(1).max(50).default(10),
   availability: z.enum(["today", "this-week", "weekend", "flexible"]).optional(),
-  preferences: z.array(z.string()).default([])
+  preferences: z.array(z.string()).default([]),
+  // Optional fields populated by the suggestion picker. When present we treat
+  // them as the authoritative search anchor and skip geocoding the freeform
+  // location string.
+  locationCity: z.string().min(1).optional(),
+  locationState: z
+    .string()
+    .min(2)
+    .max(2)
+    .transform((value) => value.toUpperCase())
+    .optional(),
+  locationPostalCode: z.string().min(3).max(10).optional(),
+  locationLat: z.coerce.number().min(-90).max(90).optional(),
+  locationLng: z.coerce.number().min(-180).max(180).optional(),
+  locationRadiusMiles: z.coerce.number().min(1).max(50).optional()
 });
 
 app.get("/health", (_req, res) => {
@@ -110,7 +124,7 @@ app.post("/api/pros/search", async (req, res) => {
         minimumRating: 4.5,
         minimumReviewCount: 10,
         category: survey.category,
-        maxDistanceMiles: survey.maxDistanceMiles
+        maxDistanceMiles: survey.locationRadiusMiles ?? survey.maxDistanceMiles
       },
       resolvedLocation: result.debug.resolvedLocation,
       searchCenter: result.debug.searchCenter,

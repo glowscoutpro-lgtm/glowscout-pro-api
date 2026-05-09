@@ -64,6 +64,12 @@ export type SurveyPayload = {
   maxDistanceMiles?: number;
   availability?: "today" | "this-week" | "weekend" | "flexible";
   preferences?: string[];
+  locationCity?: string;
+  locationState?: string;
+  locationPostalCode?: string;
+  locationLat?: number;
+  locationLng?: number;
+  locationRadiusMiles?: number;
 };
 
 export type ServiceEstimate = {

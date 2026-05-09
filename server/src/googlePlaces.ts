@@ -299,6 +299,34 @@ function placeAdminArea(place: GooglePlace): string | undefined {
   return admin?.shortText ?? admin?.longText;
 }
 
+const US_STATE_ABBRS = new Set([
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "DC"
+]);
+
+// Pull a US state abbreviation out of a Google `formattedAddress` string when
+// the structured `addressComponents` did not include one. Google formats US
+// addresses as "<street>, <city>, <STATE> <zip>, USA" so the state token
+// appears immediately before the ZIP near the end.
+function adminFromFormattedAddress(formattedAddress?: string): string | undefined {
+  if (!formattedAddress) return undefined;
+  // Try "<STATE> <5-digit ZIP>" first (most reliable for US addresses).
+  const stateZip = formattedAddress.match(/\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\b/);
+  if (stateZip && US_STATE_ABBRS.has(stateZip[1])) return stateZip[1];
+  // Fall back to a comma-separated state token before "USA"/"United States".
+  const tail = formattedAddress.match(/,\s*([A-Z]{2})\s*(?:,\s*(?:USA|United States))?$/);
+  if (tail && US_STATE_ABBRS.has(tail[1])) return tail[1];
+  return undefined;
+}
+
+function effectivePlaceAdmin(place: GooglePlace): string | undefined {
+  return placeAdminArea(place) ?? adminFromFormattedAddress(place.formattedAddress);
+}
+
 function placePostalCode(place: GooglePlace): string | undefined {
   const components = place.addressComponents ?? [];
   const postal = components.find((c) => c.types?.includes("postal_code"));
@@ -483,15 +511,74 @@ async function resolveLocation(
   return null;
 }
 
+// When the client has already picked a suggestion from /api/locations/suggest
+// it sends the resolved coords/state directly. Trust those over re-geocoding
+// the freeform `location` string — re-geocoding can flip "Jackson, MS" to
+// "Jackson, TN" if Places ranks the latter higher for the city alone.
+function centerFromSurveyOverrides(survey: SurveyPayload): ResolvedCenter | null {
+  const lat = survey.locationLat;
+  const lng = survey.locationLng;
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const state = survey.locationState?.toUpperCase();
+  const city = survey.locationCity?.trim() || undefined;
+  const postal = survey.locationPostalCode?.trim() || undefined;
+  const isPostal = Boolean(postal && POSTAL_CODE_REGEX.test(postal));
+  const formattedParts = [city, state, postal].filter((p): p is string => Boolean(p));
+  return {
+    lat,
+    lng,
+    formattedAddress: formattedParts.length > 0 ? formattedParts.join(", ") : undefined,
+    locality: city,
+    administrativeArea: state,
+    postalCode: postal,
+    country: "US",
+    isPostalQuery: isPostal,
+    source: isPostal ? "zip-centroid" : "geocode"
+  };
+}
+
+// Parse a "City, ST" / "City, State" / "City ST" string in the freeform
+// location field. We use this to detect when the user explicitly named a
+// state — that's our cue to apply a strict state filter even if the geocode
+// returned a different `administrativeArea`.
+function parseStateFromLocationText(location: string): string | undefined {
+  const trimmed = location.trim();
+  if (!trimmed) return undefined;
+  const commaTail = trimmed.match(/,\s*([A-Za-z]{2})\b\s*(?:USA|United States)?\s*$/);
+  if (commaTail) {
+    const abbr = commaTail[1].toUpperCase();
+    if (US_STATE_ABBRS.has(abbr)) return abbr;
+  }
+  const spaceTail = trimmed.match(/\b([A-Za-z]{2})\s*(?:USA|United States)?\s*$/);
+  if (spaceTail) {
+    const abbr = spaceTail[1].toUpperCase();
+    if (US_STATE_ABBRS.has(abbr)) return abbr;
+  }
+  return undefined;
+}
+
 export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string): Promise<SearchResult> {
   const baseQuery = buildServiceQuery(survey);
-  const maxDistanceMiles = clampDistanceMiles(survey.maxDistanceMiles);
+  const requestedRadius =
+    typeof survey.locationRadiusMiles === "number"
+      ? survey.locationRadiusMiles
+      : survey.maxDistanceMiles;
+  const maxDistanceMiles = clampDistanceMiles(requestedRadius);
   const radiusMeters = Math.min(
     maxDistanceMiles * METERS_PER_MILE,
     ABSOLUTE_MAX_DISTANCE_MILES * METERS_PER_MILE
   );
 
-  const center = await resolveLocation(survey.location, apiKey);
+  // The state the user explicitly named in the search box / suggestion. When
+  // present we treat this as the ground truth for filtering, regardless of
+  // what Google's geocoder returns for the freeform string.
+  const requestedState =
+    survey.locationState?.toUpperCase() ?? parseStateFromLocationText(survey.location);
+
+  const overrideCenter = centerFromSurveyOverrides(survey);
+  const center = overrideCenter ?? (await resolveLocation(survey.location, apiKey));
 
   if (!center) {
     const looksPostal = isPostalQuery(survey.location);
@@ -518,8 +605,15 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
 
     const textQueryWithLocation = `${baseQuery} near ${survey.location}`;
     const places = await callPlacesTextSearch(apiKey, textQueryWithLocation);
-    const pros = places
-      .filter(passesQualityFilters)
+    let qualified = places.filter(passesQualityFilters);
+    if (requestedState) {
+      const adminTarget = normalize(requestedState);
+      qualified = qualified.filter((place) => {
+        const placeAdmin = normalize(effectivePlaceAdmin(place));
+        return placeAdmin === adminTarget;
+      });
+    }
+    const pros = qualified
       .map((place) => mapPlaceToProResult(place, survey))
       .sort((a, b) => b.score - a.score);
     return {
@@ -564,15 +658,23 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
 
   let filtered: Annotated[] = annotated;
 
-  if (center.administrativeArea) {
-    const adminTarget = normalize(center.administrativeArea);
+  // The state we'll enforce: prefer the one the user explicitly named (in the
+  // suggestion or the freeform "Jackson, MS" text), then fall back to whatever
+  // the geocoder returned. When we have *any* known state we apply a strict
+  // filter — out-of-state results are dropped, not preserved as fallbacks.
+  const targetState = requestedState ?? center.administrativeArea;
+  if (targetState) {
+    const adminTarget = normalize(targetState);
     const adminMatches = annotated.filter((entry) => {
-      const placeAdmin = normalize(placeAdminArea(entry.place));
-      return placeAdmin && placeAdmin === adminTarget;
+      const placeAdmin = normalize(effectivePlaceAdmin(entry.place));
+      // Drop entries whose admin area we cannot determine — when the user
+      // asked for "Jackson, MS" we'd rather show fewer results than risk
+      // surfacing an out-of-state provider whose state we just couldn't read.
+      return placeAdmin === adminTarget;
     });
-    if (treatAsPostal) {
-      // For postal queries, never fall back to out-of-state results — apply
-      // the admin-area filter strictly even if it leaves zero matches.
+    if (treatAsPostal || requestedState) {
+      // For postal queries OR when the user named a state explicitly, never
+      // fall back to out-of-state results. Apply strictly even if 0 match.
       filtered = adminMatches;
     } else if (adminMatches.length > 0 && adminMatches.length < annotated.length) {
       filtered = adminMatches;
