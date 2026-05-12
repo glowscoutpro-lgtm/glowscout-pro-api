@@ -3,12 +3,60 @@ import os from "os";
 import path from "path";
 import { z } from "zod";
 
-const ratingField = z.coerce.number().min(0).max(5).optional();
+const BOOLEAN_TRUE_STRINGS = new Set(["true", "yes", "y", "1", "on", "checked"]);
+const BOOLEAN_FALSE_STRINGS = new Set(["false", "no", "n", "0", "off", "unchecked", "none"]);
+
+function coerceFlexibleBoolean(value: unknown): unknown {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) return undefined;
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === "") return undefined;
+    if (BOOLEAN_TRUE_STRINGS.has(trimmed)) return true;
+    if (BOOLEAN_FALSE_STRINGS.has(trimmed)) return false;
+  }
+  if (value === null) return undefined;
+  return value;
+}
+
+const flexibleBoolean = z.preprocess(coerceFlexibleBoolean, z.boolean().optional());
+
+function coerceFlexibleNumber(value: unknown): unknown {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return undefined;
+    const lowered = trimmed.toLowerCase();
+    if (lowered === "nan" || lowered === "null" || lowered === "undefined") return undefined;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  if (value === null) return undefined;
+  return value;
+}
+
+const ratingField = z.preprocess(coerceFlexibleNumber, z.number().min(0).max(5).optional());
+const overallRatingField = z.preprocess(coerceFlexibleNumber, z.number().min(1).max(5).optional());
 
 const sentimentEnum = z.enum(["yes", "somewhat", "no", "maybe"]);
-const sentimentOrRatingField = z
-  .union([sentimentEnum, z.coerce.number().min(0).max(5)])
-  .optional();
+const sentimentOrRatingField = z.preprocess(
+  (value) => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") return undefined;
+      const lowered = trimmed.toLowerCase();
+      if (["yes", "somewhat", "no", "maybe"].includes(lowered)) return lowered;
+      return coerceFlexibleNumber(trimmed);
+    }
+    return coerceFlexibleNumber(value);
+  },
+  z.union([sentimentEnum, z.number().min(0).max(5)]).optional()
+);
 
 const shortTagArray = z
   .array(z.string().trim().min(1).max(120))
@@ -19,9 +67,9 @@ const baseSchema = z.object({
   surveyType: z.enum(["consumer_beta", "professional_beta"]),
   name: z.string().trim().max(120).optional(),
   email: z.string().trim().email().max(200).optional(),
-  canContact: z.boolean().optional(),
+  canContact: flexibleBoolean,
   testerRole: z.string().trim().max(120).optional(),
-  overallRating: z.coerce.number().min(1).max(5).optional(),
+  overallRating: overallRatingField,
   easeOfUse: sentimentOrRatingField,
   searchQuality: sentimentOrRatingField,
   trustResults: sentimentOrRatingField,
@@ -36,12 +84,12 @@ const baseSchema = z.object({
   trustSignalOther: z.string().trim().max(4000).optional(),
   bookingConfidenceFactor: z.string().trim().max(4000).optional(),
   profession: z.string().trim().max(120).optional(),
-  offersMobileService: z.boolean().optional(),
-  privateStudio: z.boolean().optional(),
-  wouldClaimProfile: z.boolean().optional(),
+  offersMobileService: flexibleBoolean,
+  privateStudio: flexibleBoolean,
+  wouldClaimProfile: flexibleBoolean,
   licenseVerificationHelpful: ratingField,
-  wouldAddPricing: z.boolean().optional(),
-  wouldPayForEnhancedProfile: z.boolean().optional(),
+  wouldAddPricing: flexibleBoolean,
+  wouldPayForEnhancedProfile: flexibleBoolean,
   businessValue: z.string().trim().max(4000).optional(),
   concerns: z.string().trim().max(4000).optional(),
   appVersion: z.string().trim().max(40).optional(),

@@ -322,6 +322,142 @@ const cases: Case[] = [
     expectValid: false
   },
   {
+    name: "pro reviewer string booleans (yes/no) and blank numeric rating validate",
+    input: {
+      surveyType: "professional_beta",
+      profession: "nail tech",
+      privateStudio: "yes",
+      wouldClaimProfile: "no",
+      offersMobileService: "yes",
+      licenseVerificationHelpful: "",
+      wouldAddPricing: "true",
+      wouldPayForEnhancedProfile: "false"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta",
+      privateStudio: true,
+      wouldClaimProfile: false,
+      offersMobileService: true,
+      wouldAddPricing: true,
+      wouldPayForEnhancedProfile: false
+    }
+  },
+  {
+    name: "string boolean variants (on/off/1/0) normalize",
+    input: {
+      surveyType: "professional_beta",
+      privateStudio: "on",
+      wouldClaimProfile: "off",
+      offersMobileService: "1",
+      wouldAddPricing: "0"
+    },
+    expectValid: true,
+    expectFields: {
+      privateStudio: true,
+      wouldClaimProfile: false,
+      offersMobileService: true,
+      wouldAddPricing: false
+    }
+  },
+  {
+    name: "NaN string and 'nan' literal for numeric rating treated as undefined",
+    input: {
+      surveyType: "professional_beta",
+      licenseVerificationHelpful: "nan",
+      overallRating: ""
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta"
+    }
+  },
+  {
+    name: "literal NaN number for licenseVerificationHelpful treated as undefined",
+    input: {
+      surveyType: "professional_beta",
+      licenseVerificationHelpful: Number.NaN
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta"
+    }
+  },
+  {
+    name: "blank string optional booleans treated as undefined",
+    input: {
+      surveyType: "professional_beta",
+      privateStudio: "",
+      wouldClaimProfile: "",
+      offersMobileService: "",
+      canContact: ""
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta"
+    }
+  },
+  {
+    name: "numeric strings for licenseVerificationHelpful coerce to number",
+    input: {
+      surveyType: "professional_beta",
+      licenseVerificationHelpful: "4"
+    },
+    expectValid: true,
+    expectFields: {
+      licenseVerificationHelpful: 4
+    }
+  },
+  {
+    name: "out-of-range numeric rating rejected",
+    input: {
+      surveyType: "professional_beta",
+      licenseVerificationHelpful: 7
+    },
+    expectValid: false
+  },
+  {
+    name: "blank string for sentimentOrRating treated as undefined",
+    input: {
+      surveyType: "consumer_beta",
+      easeOfUse: "",
+      searchQuality: "",
+      trustResults: "yes"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "consumer_beta",
+      trustResults: "yes"
+    }
+  },
+  {
+    name: "full pro reviewer payload from screenshot validates",
+    input: {
+      surveyType: "professional_beta",
+      profession: "esthetician",
+      offersMobileService: "no",
+      privateStudio: "yes",
+      wouldClaimProfile: "yes",
+      licenseVerificationHelpful: "",
+      wouldAddPricing: "yes",
+      wouldPayForEnhancedProfile: "no",
+      businessValue: "would bring more clients",
+      concerns: "none right now",
+      appVersion: "1.0.0",
+      appBuild: "16",
+      platform: "ios"
+    },
+    expectValid: true,
+    expectFields: {
+      surveyType: "professional_beta",
+      offersMobileService: false,
+      privateStudio: true,
+      wouldClaimProfile: true,
+      wouldAddPricing: true,
+      wouldPayForEnhancedProfile: false
+    }
+  },
+  {
     name: "device + search context fields validate",
     input: {
       surveyType: "consumer_beta",
