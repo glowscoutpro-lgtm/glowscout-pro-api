@@ -16,6 +16,7 @@ import {
 } from "./feedback.js";
 import { suggestLocations } from "./locationSuggest.js";
 import { notifyFeedbackEmail } from "./notifyEmail.js";
+import { normalizeServicesInput } from "./serviceLabels.js";
 import type { SurveyPayload } from "./types.js";
 
 dotenv.config();
@@ -32,56 +33,59 @@ const surveySchema = z.object({
   category: z
     .enum(["nails", "hair", "barber", "lashes", "brows", "skin", "waxing", "massage", "makeup", "wellness"])
     .default("nails"),
-  services: z
-    .array(
-      z.enum([
-        "russian-manicure",
-        "gel-manicure",
-        "structured-gel",
-        "dip-powder",
-        "acrylic-full-set",
-        "nail-art",
-        "dry-pedicure",
-        "spa-pedicure",
-        "builder-gel",
-        "classic-manicure",
-        "haircut",
-        "blowout",
-        "hair-color",
-        "balayage",
-        "hair-extensions",
-        "braids",
-        "mens-haircut",
-        "barber-fade",
-        "beard-trim",
-        "hot-towel-shave",
-        "lash-extensions",
-        "lash-lift",
-        "lash-fill",
-        "brow-shaping",
-        "brow-lamination",
-        "brow-tint",
-        "custom-facial",
-        "chemical-peel",
-        "dermaplaning",
-        "microneedling",
-        "brazilian-wax",
-        "brow-wax",
-        "full-leg-wax",
-        "swedish-massage",
-        "deep-tissue-massage",
-        "sports-massage",
-        "prenatal-massage",
-        "event-makeup",
-        "bridal-makeup",
-        "makeup-lesson",
-        "body-sculpting",
-        "sauna-session",
-        "reiki",
-        "holistic-facial"
-      ])
-    )
-    .default([]),
+  services: z.preprocess(
+    normalizeServicesInput,
+    z
+      .array(
+        z.enum([
+          "russian-manicure",
+          "gel-manicure",
+          "structured-gel",
+          "dip-powder",
+          "acrylic-full-set",
+          "nail-art",
+          "dry-pedicure",
+          "spa-pedicure",
+          "builder-gel",
+          "classic-manicure",
+          "haircut",
+          "blowout",
+          "hair-color",
+          "balayage",
+          "hair-extensions",
+          "braids",
+          "mens-haircut",
+          "barber-fade",
+          "beard-trim",
+          "hot-towel-shave",
+          "lash-extensions",
+          "lash-lift",
+          "lash-fill",
+          "brow-shaping",
+          "brow-lamination",
+          "brow-tint",
+          "custom-facial",
+          "chemical-peel",
+          "dermaplaning",
+          "microneedling",
+          "brazilian-wax",
+          "brow-wax",
+          "full-leg-wax",
+          "swedish-massage",
+          "deep-tissue-massage",
+          "sports-massage",
+          "prenatal-massage",
+          "event-makeup",
+          "bridal-makeup",
+          "makeup-lesson",
+          "body-sculpting",
+          "sauna-session",
+          "reiki",
+          "holistic-facial"
+        ])
+      )
+      .default([])
+  ),
   budget: z.enum(["under-50", "50-85", "85-125", "125-plus"]).optional(),
   maxDistanceMiles: z.coerce.number().min(1).max(50).default(10),
   availability: z.enum(["today", "this-week", "weekend", "flexible"]).optional(),
