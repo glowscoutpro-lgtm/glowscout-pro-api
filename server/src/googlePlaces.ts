@@ -11,6 +11,7 @@ import type {
   SurveyPayload
 } from "./types.js";
 import {
+  extractUsZip,
   isUsZipQuery,
   resolveUsZip,
   zipCentroidToResolvedLocation
@@ -481,6 +482,18 @@ function resolvedCenterToLocation(query: string, center: ResolvedCenter): Resolv
   };
 }
 
+// Pull a 5-digit US ZIP from anywhere in a freeform string. `extractUsZip`
+// only matches pure-ZIP queries (`^\s*\d{5}\s*$`) so we cannot reuse it for
+// inputs like "Long Grove, IL 60047" — we still want to anchor on that ZIP
+// when Google's Geocoding API isn't available.
+const EMBEDDED_ZIP_REGEX = /(?<!\d)(\d{5})(?:-\d{4})?(?!\d)/;
+
+function findUsZipInText(input: string): string | null {
+  if (!input) return null;
+  const match = EMBEDDED_ZIP_REGEX.exec(input);
+  return match ? match[1] : null;
+}
+
 async function resolveLocation(
   rawLocation: string,
   apiKey: string
@@ -490,8 +503,15 @@ async function resolveLocation(
     return geocodeToResolvedCenter(geocode);
   }
 
-  if (isUsZipQuery(rawLocation)) {
-    const centroid = await resolveUsZip(rawLocation);
+  // Fallback: peel a US ZIP out of the freeform string (pure ZIP OR embedded,
+  // e.g. "Long Grove, IL 60047"). Without this, queries that include a ZIP
+  // alongside a city silently fell through to the no-center path when
+  // Google's Geocoding API was unreachable / disabled, which historically
+  // skipped the haversine radius filter and surfaced providers many miles
+  // outside the requested radius.
+  const zipFromQuery = extractUsZip(rawLocation) ?? findUsZipInText(rawLocation);
+  if (zipFromQuery) {
+    const centroid = await resolveUsZip(zipFromQuery);
     if (centroid) {
       const resolved = zipCentroidToResolvedLocation(rawLocation, centroid);
       return {
@@ -502,7 +522,7 @@ async function resolveLocation(
         administrativeArea: resolved.administrativeArea,
         postalCode: resolved.postalCode,
         country: resolved.country,
-        isPostalQuery: true,
+        isPostalQuery: isUsZipQuery(rawLocation),
         source: "zip-centroid"
       };
     }
@@ -581,48 +601,24 @@ export async function searchGooglePlaces(survey: SurveyPayload, apiKey: string):
   const center = overrideCenter ?? (await resolveLocation(survey.location, apiKey));
 
   if (!center) {
+    // No usable center: we cannot enforce the user's selected radius. Refuse
+    // to surface results — an unrestricted "near X" Places call has no
+    // distance filter and historically surfaced providers tens of miles
+    // outside the requested radius (e.g. La Grange, IL when the user asked
+    // for Long Grove, IL at 5 miles).
     const looksPostal = isPostalQuery(survey.location);
     const resolvedLocation: ResolvedLocation = {
       query: survey.location,
       isPostalQuery: looksPostal,
       source: "unresolved"
     };
-
-    if (looksPostal) {
-      // Refuse to do an unrestricted global text search for postal-shaped
-      // queries — that path produces out-of-state false positives like
-      // "Beverly Hills Premier Nail Salon Pittsburgh" for ZIP 90210.
-      return {
-        pros: [],
-        debug: {
-          resolvedLocation,
-          searchCenter: null,
-          rawResultCount: 0,
-          filteredOutCount: 0
-        }
-      };
-    }
-
-    const textQueryWithLocation = `${baseQuery} near ${survey.location}`;
-    const places = await callPlacesTextSearch(apiKey, textQueryWithLocation);
-    let qualified = places.filter(passesQualityFilters);
-    if (requestedState) {
-      const adminTarget = normalize(requestedState);
-      qualified = qualified.filter((place) => {
-        const placeAdmin = normalize(effectivePlaceAdmin(place));
-        return placeAdmin === adminTarget;
-      });
-    }
-    const pros = qualified
-      .map((place) => mapPlaceToProResult(place, survey))
-      .sort((a, b) => b.score - a.score);
     return {
-      pros,
+      pros: [],
       debug: {
         resolvedLocation,
         searchCenter: null,
-        rawResultCount: places.length,
-        filteredOutCount: places.length - pros.length
+        rawResultCount: 0,
+        filteredOutCount: 0
       }
     };
   }
