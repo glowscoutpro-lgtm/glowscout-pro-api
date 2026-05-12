@@ -1,3 +1,4 @@
+import { getDemoPros } from "./demoData.js";
 import { searchGooglePlaces, haversineMiles } from "./googlePlaces.js";
 import type { SurveyPayload } from "./types.js";
 import { _resetZipCacheForTests } from "./zipResolver.js";
@@ -234,6 +235,55 @@ async function unresolvedNonPostalReturnsEmpty(): Promise<void> {
   );
 }
 
+function demoPathHonorsRequestedRadius(): void {
+  // Demo mode (no Google API key on the server) was reporting
+  // searchCenter.radiusMiles=10 even when the client asked for 5. The
+  // response radius must mirror the requested radius so the client UI
+  // and any downstream consumers see the user's selection.
+  const fiveMile: SurveyPayload = {
+    location: "Long Grove, IL 60047",
+    category: "nails",
+    services: [],
+    preferences: [],
+    maxDistanceMiles: 5
+  };
+  const fiveResult = getDemoPros(fiveMile);
+  assert(
+    fiveResult.debug.searchCenter?.radiusMiles === 5,
+    `demo searchCenter.radiusMiles reflects maxDistanceMiles=5 (got ${fiveResult.debug.searchCenter?.radiusMiles})`
+  );
+
+  // locationRadiusMiles (the field /api/locations/suggest can attach) wins
+  // over maxDistanceMiles, mirroring the live path's selection.
+  const overrideRadius: SurveyPayload = {
+    location: "60047",
+    category: "nails",
+    services: [],
+    preferences: [],
+    maxDistanceMiles: 25,
+    locationRadiusMiles: 3
+  };
+  const overrideResult = getDemoPros(overrideRadius);
+  assert(
+    overrideResult.debug.searchCenter?.radiusMiles === 3,
+    `demo locationRadiusMiles wins over maxDistanceMiles (got ${overrideResult.debug.searchCenter?.radiusMiles})`
+  );
+
+  // A 20-mile request must propagate as 20, not clamp to the previous
+  // hard-coded 10.
+  const twentyMile: SurveyPayload = {
+    location: "Long Grove, IL 60047",
+    category: "nails",
+    services: [],
+    preferences: [],
+    maxDistanceMiles: 20
+  };
+  assert(
+    getDemoPros(twentyMile).debug.searchCenter?.radiusMiles === 20,
+    "demo radius=20 is preserved (not capped at the old default of 10)"
+  );
+}
+
 async function run(): Promise<void> {
   const originalFetch = globalThis.fetch;
   try {
@@ -241,6 +291,7 @@ async function run(): Promise<void> {
     await longGroveFiveMileWhenGeocoderFailsFallsBackToZip();
     await pureZipFiveMileExcludesLaGrange();
     await unresolvedNonPostalReturnsEmpty();
+    demoPathHonorsRequestedRadius();
   } finally {
     globalThis.fetch = originalFetch;
   }

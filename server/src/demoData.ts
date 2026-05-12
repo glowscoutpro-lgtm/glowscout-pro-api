@@ -475,7 +475,10 @@ function toPro(template: DemoTemplate, survey: SurveyPayload, services: ServiceS
   };
 }
 
-function resolveDemoLocation(rawLocation: string): {
+function resolveDemoLocation(
+  rawLocation: string,
+  radiusMiles: number
+): {
   center: SearchCenter | null;
   resolved: ResolvedLocation;
 } {
@@ -492,9 +495,23 @@ function resolveDemoLocation(rawLocation: string): {
     };
   }
   return {
-    center: { ...match.center, radiusMiles: DEFAULT_DEMO_RADIUS_MILES },
+    center: { ...match.center, radiusMiles },
     resolved: { query: rawLocation, source: "demo", ...match.resolved }
   };
+}
+
+// Mirror the live path's radius selection so the demo response reports the
+// radius the client actually asked for (locationRadiusMiles wins over
+// maxDistanceMiles when present). Bounded to [1, 50] to match the schema.
+function demoRequestedRadiusMiles(survey: SurveyPayload): number {
+  const raw =
+    typeof survey.locationRadiusMiles === "number"
+      ? survey.locationRadiusMiles
+      : survey.maxDistanceMiles;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_DEMO_RADIUS_MILES;
+  }
+  return Math.min(Math.max(raw, 1), 50);
 }
 
 export function getDemoPros(survey: SurveyPayload): DemoSearchResult {
@@ -509,7 +526,8 @@ export function getDemoPros(survey: SurveyPayload): DemoSearchResult {
       normalizedLocation.includes("long grove") ||
       normalizedLocation.includes("hawthorn woods"));
 
-  const { center, resolved } = resolveDemoLocation(survey.location);
+  const requestedRadius = demoRequestedRadiusMiles(survey);
+  const { center, resolved } = resolveDemoLocation(survey.location, requestedRadius);
   const debug: SearchDebug = {
     resolvedLocation: resolved,
     searchCenter: center
