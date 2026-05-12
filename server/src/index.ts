@@ -16,7 +16,7 @@ import {
 } from "./feedback.js";
 import { suggestLocations } from "./locationSuggest.js";
 import { notifyFeedbackEmail } from "./notifyEmail.js";
-import { normalizeServicesInput } from "./serviceLabels.js";
+import { normalizeCategoryValue, normalizeServicesInput } from "./serviceLabels.js";
 import type { SurveyPayload } from "./types.js";
 
 dotenv.config();
@@ -30,9 +30,12 @@ app.use(express.json({ limit: "1mb" }));
 
 const surveySchema = z.object({
   location: z.string().min(2),
-  category: z
-    .enum(["nails", "hair", "barber", "lashes", "brows", "skin", "waxing", "massage", "makeup", "wellness"])
-    .default("nails"),
+  category: z.preprocess(
+    normalizeCategoryValue,
+    z
+      .enum(["nails", "hair", "barber", "lashes", "brows", "skin", "waxing", "massage", "makeup", "wellness"])
+      .default("nails")
+  ),
   services: z.preprocess(
     normalizeServicesInput,
     z

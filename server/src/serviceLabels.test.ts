@@ -1,5 +1,9 @@
 import { getDemoPros } from "./demoData.js";
-import { normalizeServiceValue, normalizeServicesInput } from "./serviceLabels.js";
+import {
+  normalizeCategoryValue,
+  normalizeServiceValue,
+  normalizeServicesInput
+} from "./serviceLabels.js";
 import type { SurveyPayload } from "./types.js";
 
 let failed = 0;
@@ -77,16 +81,80 @@ function assert(condition: unknown, message: string): void {
   assert(normalizeServicesInput(undefined) === undefined, "undefined input passes through to defaults");
 }
 
+// Unit-level: readable category labels the app sends must normalize to the
+// existing enum slug. Unknowns pass through so the Zod enum still 400s.
+{
+  const categoryCases: Array<[string, string]> = [
+    ["Nail Tech", "nails"],
+    ["nail-tech", "nails"],
+    ["Nail Technician", "nails"],
+    ["Nails", "nails"],
+    ["Manicure", "nails"],
+    ["Manicurist", "nails"],
+    ["Hair Stylist", "hair"],
+    ["hairstylist", "hair"],
+    ["Hair", "hair"],
+    ["Barber", "barber"],
+    ["Men's Haircut", "barber"],
+    ["Mens Haircut", "barber"],
+    ["Lash Artist", "lashes"],
+    ["Lash Tech", "lashes"],
+    ["Brows", "brows"],
+    ["Eyebrows", "brows"],
+    ["Microblading", "brows"],
+    ["Esthetician", "skin"],
+    ["Aesthetician", "skin"],
+    ["Skin", "skin"],
+    ["Skincare", "skin"],
+    ["Waxing", "waxing"],
+    ["Hair Removal", "waxing"],
+    ["Massage", "massage"],
+    ["Massage Therapist", "massage"],
+    ["Makeup", "makeup"],
+    ["Makeup Artist", "makeup"],
+    ["MUA", "makeup"],
+    ["Wellness", "wellness"],
+    ["Spa", "wellness"],
+    ["  NAIL   TECH  ", "nails"]
+  ];
+  for (const [label, slug] of categoryCases) {
+    assert(
+      normalizeCategoryValue(label) === slug,
+      `category "${label}" → "${slug}" (got "${String(normalizeCategoryValue(label))}")`
+    );
+  }
+  // Existing slug clients keep working.
+  for (const slug of ["nails", "hair", "barber", "lashes", "brows", "skin", "waxing", "massage", "makeup", "wellness"]) {
+    assert(
+      normalizeCategoryValue(slug) === slug,
+      `category slug "${slug}" passes through unchanged`
+    );
+  }
+  // Genuinely unknown labels are not silently dropped.
+  assert(
+    normalizeCategoryValue("Astrology") === "Astrology",
+    "unknown category label passed through unchanged"
+  );
+  assert(
+    normalizeCategoryValue("totally-bogus") === "totally-bogus",
+    "unknown category slug passed through unchanged"
+  );
+}
+
 // Schema-level: build the survey schema the way index.ts does and verify
 // the Lake Zurich payload with display labels parses to slugs and that
 // the demo path then yields matches instead of a 400.
 async function lakeZurichLabelPayloadParses(): Promise<void> {
   const { z } = await import("zod");
+  const { normalizeCategoryValue: normCat } = await import("./serviceLabels.js");
   const surveySchema = z.object({
     location: z.string().min(2),
-    category: z
-      .enum(["nails", "hair", "barber", "lashes", "brows", "skin", "waxing", "massage", "makeup", "wellness"])
-      .default("nails"),
+    category: z.preprocess(
+      normCat,
+      z
+        .enum(["nails", "hair", "barber", "lashes", "brows", "skin", "waxing", "massage", "makeup", "wellness"])
+        .default("nails")
+    ),
     services: z.preprocess(
       normalizeServicesInput,
       z
@@ -196,6 +264,75 @@ async function lakeZurichLabelPayloadParses(): Promise<void> {
     maxDistanceMiles: 5
   });
   assert(!bad.success, "genuinely unknown service value still fails validation");
+
+  // Exact TestFlight 60047/Lake Zurich payload: app sends the readable
+  // profession label ("Nail Tech") as `category` alongside service display
+  // labels. Both must normalize so the schema accepts the payload and
+  // Lake Zurich still yields demo matches (Elina Nail Studio).
+  const appPayload = {
+    location: "60047",
+    category: "Nail Tech",
+    services: ["Russian manicure", "Gel manicure", "Classic manicure"],
+    preferences: ["Walk-in availability", "Speaks Russian"],
+    maxDistanceMiles: 10
+  };
+  const appParsed = surveySchema.safeParse(appPayload);
+  assert(
+    appParsed.success,
+    `60047 "Nail Tech" label payload parses (errors=${appParsed.success ? "" : JSON.stringify(appParsed.error.flatten())})`
+  );
+  if (appParsed.success) {
+    assert(
+      appParsed.data.category === "nails",
+      `category "Nail Tech" normalized to "nails" (got "${appParsed.data.category}")`
+    );
+    assert(
+      appParsed.data.services.join(",") === "russian-manicure,gel-manicure,classic-manicure",
+      `services normalized to slugs (got ${JSON.stringify(appParsed.data.services)})`
+    );
+    const survey = appParsed.data as SurveyPayload;
+    const result = getDemoPros(survey);
+    assert(
+      result.pros.length > 0,
+      `60047 "Nail Tech" payload yields demo matches (got ${result.pros.length})`
+    );
+    assert(
+      result.pros.some((p) => p.name === "Elina Nail Studio"),
+      `60047 "Nail Tech" payload surfaces Elina Nail Studio`
+    );
+  }
+
+  // Common alternate profession labels from the app's profession picker
+  // must also normalize to existing slugs.
+  const altCases: Array<[string, string]> = [
+    ["nail-tech", "nails"],
+    ["Nail Technician", "nails"],
+    ["Hair Stylist", "hair"],
+    ["Lash Artist", "lashes"],
+    ["Esthetician", "skin"],
+    ["Barber", "barber"]
+  ];
+  for (const [label, slug] of altCases) {
+    const out = surveySchema.safeParse({
+      location: "Lake Zurich, IL",
+      category: label,
+      services: [],
+      maxDistanceMiles: 10
+    });
+    assert(
+      out.success && out.data.category === slug,
+      `category "${label}" payload normalizes to "${slug}" (parsed=${out.success ? out.data.category : "FAIL"})`
+    );
+  }
+
+  // Genuinely unknown category values must still fail (no silent fallback).
+  const badCategory = surveySchema.safeParse({
+    location: "Lake Zurich, IL",
+    category: "Astrologer",
+    services: [],
+    maxDistanceMiles: 10
+  });
+  assert(!badCategory.success, "genuinely unknown category value still fails validation");
 }
 
 async function run(): Promise<void> {

@@ -1,4 +1,4 @@
-import type { ServiceSlug } from "./types.js";
+import type { ServiceCategory, ServiceSlug } from "./types.js";
 
 // Display labels the app shows in the UI. The TestFlight build started
 // sending these strings ("Russian manicure", "Gel manicure", ...) instead
@@ -101,4 +101,101 @@ export function normalizeServiceValue(value: unknown): unknown {
 export function normalizeServicesInput(input: unknown): unknown {
   if (!Array.isArray(input)) return input;
   return input.map(normalizeServiceValue);
+}
+
+// Readable profession/category labels the iOS app started sending in place
+// of the underlying enum slug ("Nail Tech" instead of "nails"). Map them
+// back so the Zod enum still validates; unknown values pass through so
+// Zod produces a real "Invalid survey" 400.
+const CATEGORY_LABEL_TO_SLUG: Record<string, ServiceCategory> = {
+  // Nails
+  "nails": "nails",
+  "nail": "nails",
+  "nail tech": "nails",
+  "nail technician": "nails",
+  "nail technicians": "nails",
+  "nail-tech": "nails",
+  "nail artist": "nails",
+  "manicurist": "nails",
+  "manicure": "nails",
+  "pedicure": "nails",
+  // Hair
+  "hair": "hair",
+  "hair stylist": "hair",
+  "hairstylist": "hair",
+  "hair stylists": "hair",
+  "stylist": "hair",
+  "hair salon": "hair",
+  "colorist": "hair",
+  // Barber
+  "barber": "barber",
+  "barbers": "barber",
+  "barber shop": "barber",
+  "barbershop": "barber",
+  "men's haircut": "barber",
+  "mens haircut": "barber",
+  "men's barber": "barber",
+  "mens barber": "barber",
+  // Lashes
+  "lash": "lashes",
+  "lashes": "lashes",
+  "lash artist": "lashes",
+  "lash tech": "lashes",
+  "lash technician": "lashes",
+  "eyelash": "lashes",
+  "eyelashes": "lashes",
+  "lash extensions": "lashes",
+  // Brows
+  "brow": "brows",
+  "brows": "brows",
+  "brow artist": "brows",
+  "brow tech": "brows",
+  "eyebrow": "brows",
+  "eyebrows": "brows",
+  "microblading": "brows",
+  // Skin
+  "skin": "skin",
+  "skincare": "skin",
+  "skin care": "skin",
+  "esthetician": "skin",
+  "aesthetician": "skin",
+  "esthetics": "skin",
+  "aesthetics": "skin",
+  "facial": "skin",
+  "facials": "skin",
+  // Waxing
+  "wax": "waxing",
+  "waxing": "waxing",
+  "wax specialist": "waxing",
+  "hair removal": "waxing",
+  // Massage
+  "massage": "massage",
+  "massage therapy": "massage",
+  "massage therapist": "massage",
+  "bodywork": "massage",
+  // Makeup
+  "makeup": "makeup",
+  "make up": "makeup",
+  "make-up": "makeup",
+  "makeup artist": "makeup",
+  "mua": "makeup",
+  // Wellness
+  "wellness": "wellness",
+  "spa": "wellness",
+  "holistic": "wellness",
+  "sauna": "wellness",
+  "reiki": "wellness"
+};
+
+// Normalize a category value: pass valid slugs through unchanged, map known
+// readable labels to their slug, and leave everything else alone so the
+// Zod enum still surfaces "Invalid survey" for genuinely unknown values.
+export function normalizeCategoryValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return value;
+  const key = normalizeKey(trimmed);
+  // Try the raw key first, then a dehyphenated variant ("nail-tech" → "nail tech").
+  const dehyphenated = key.replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  return CATEGORY_LABEL_TO_SLUG[key] ?? CATEGORY_LABEL_TO_SLUG[dehyphenated] ?? value;
 }
