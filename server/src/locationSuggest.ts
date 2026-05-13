@@ -198,7 +198,7 @@ const STATE_ABBR_BY_NAME: Record<string, string> = {
   wyoming: "WY", "district of columbia": "DC"
 };
 
-function parseCityState(query: string): { city: string; state?: string } {
+export function parseCityState(query: string): { city: string; state?: string } {
   const trimmed = query.trim().replace(/\s+/g, " ");
   // Match "City, ST" or "City, State"
   const commaIdx = trimmed.lastIndexOf(",");
@@ -256,6 +256,100 @@ export function normalizeCityName(value: string): string {
     .replace(/(^|\s)ste(\s|$)/g, "$1sainte$2")
     .replace(/(^|\s)mt(\s|$)/g, "$1mount$2")
     .replace(/(^|\s)ft(\s|$)/g, "$1fort$2");
+}
+
+export type OfflineCityResolution = {
+  city: string;
+  state: string;
+  lat: number;
+  lng: number;
+  // Representative ZIP for the city, when we have one. Helps downstream
+  // consumers attach a postalCode and use the zip-centroid source label.
+  postalCode?: string;
+  // "embedded" — pulled from EMBEDDED_ZIP_CENTROIDS via the city index.
+  // "curated" — pulled from a NEARBY_BY_ZIP entry (towns like Long Grove, IL
+  //   that share a ZIP with a primary city).
+  source: "embedded" | "curated";
+};
+
+// Deterministic offline lookup for a "City, ST" / "City, State" string.
+// Returns null when neither the embedded ZIP catalog nor the curated
+// NEARBY_BY_ZIP table knows about the city. Used by the live-search path as a
+// fallback when Google's Geocoding API is unreachable, disabled, or rate
+// limited — without this, common queries like "Lake Zurich, IL" resolved to a
+// null search center and returned zero pros.
+export function resolveOfflineCityState(query: string): OfflineCityResolution | null {
+  const trimmed = query?.trim();
+  if (!trimmed) return null;
+  const parsed = parseCityState(trimmed);
+  const cityRaw = parsed.city?.trim();
+  if (!cityRaw || cityRaw.length < 2) return null;
+  const cityNormalized = normalizeCityName(cityRaw);
+  const targetState = parsed.state;
+
+  // First pass: exact embedded-city match for the parsed city+state. The
+  // embedded index is built off EMBEDDED_ZIP_CENTROIDS, so Lake Zurich (60047)
+  // and other primary cities resolve here.
+  const index = getCityIndex();
+  for (const entry of index) {
+    if (targetState && entry.state.toUpperCase() !== targetState) continue;
+    const entryNormalized = normalizeCityName(entry.city);
+    if (entryNormalized === cityNormalized) {
+      return {
+        city: entry.city,
+        state: entry.state,
+        lat: entry.lat,
+        lng: entry.lng,
+        postalCode: entry.postalCode,
+        source: "embedded"
+      };
+    }
+  }
+
+  // Second pass: scan NEARBY_BY_ZIP for towns that share a ZIP with a primary
+  // city (Long Grove, IL → 60047). These are curated coordinates so they are
+  // safe to use as a search center.
+  for (const [zip, nearbyEntries] of Object.entries(NEARBY_BY_ZIP)) {
+    for (const nearby of nearbyEntries) {
+      if (targetState && nearby.state.toUpperCase() !== targetState) continue;
+      if (normalizeCityName(nearby.city) === cityNormalized) {
+        return {
+          city: nearby.city,
+          state: nearby.state,
+          lat: nearby.lat,
+          lng: nearby.lng,
+          postalCode: zip,
+          source: "curated"
+        };
+      }
+    }
+  }
+
+  // Third pass: substring/startswith match against the embedded city index
+  // when the user didn't include a state. We keep this strict — exact case
+  // already matched above — and only allow it when the parse identified just
+  // a city. Without this, queries like "Lake Zurich" (no state) still
+  // resolve to Lake Zurich, IL through the embedded catalog.
+  if (!targetState) {
+    for (const entry of index) {
+      const entryNormalized = normalizeCityName(entry.city);
+      if (
+        entryNormalized.startsWith(cityNormalized) ||
+        cityNormalized.startsWith(entryNormalized)
+      ) {
+        return {
+          city: entry.city,
+          state: entry.state,
+          lat: entry.lat,
+          lng: entry.lng,
+          postalCode: entry.postalCode,
+          source: "embedded"
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 const MAX_CITY_SUGGESTIONS = 8;

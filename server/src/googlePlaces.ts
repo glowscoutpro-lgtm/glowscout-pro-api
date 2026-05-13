@@ -16,6 +16,7 @@ import {
   resolveUsZip,
   zipCentroidToResolvedLocation
 } from "./zipResolver.js";
+import { resolveOfflineCityState } from "./locationSuggest.js";
 
 type GoogleAddressComponent = {
   longText?: string;
@@ -526,6 +527,33 @@ async function resolveLocation(
         source: "zip-centroid"
       };
     }
+  }
+
+  // Final fallback: deterministic city/state lookup against our embedded ZIP
+  // catalog + curated nearby table. Without this, common queries like
+  // "Lake Zurich, IL" or "Long Grove, IL" resolved to a null search center
+  // when Google's Geocoding API was disabled, rate limited, or otherwise
+  // unreachable — and live mode returned zero matches even though we know
+  // exactly where those towns are. Strict radius filtering is preserved: we
+  // still pass the resolved center into the Places call and apply the same
+  // haversine post-filter as the geocoded path.
+  const offline = resolveOfflineCityState(rawLocation);
+  if (offline) {
+    const postal = offline.postalCode;
+    const formattedAddress = postal
+      ? `${offline.city}, ${offline.state} ${postal}, USA`
+      : `${offline.city}, ${offline.state}, USA`;
+    return {
+      lat: offline.lat,
+      lng: offline.lng,
+      formattedAddress,
+      locality: offline.city,
+      administrativeArea: offline.state,
+      postalCode: postal,
+      country: "US",
+      isPostalQuery: false,
+      source: "zip-centroid"
+    };
   }
 
   return null;
