@@ -62,6 +62,15 @@ const NEARBY_BY_ZIP: Record<string, NearbyEntry[]> = {
   "60614": [
     { city: "Lincoln Park", state: "IL", lat: 41.9214, lng: -87.6534, radiusMiles: 1 },
     { city: "Old Town", state: "IL", lat: 41.9099, lng: -87.6375, radiusMiles: 1 }
+  ],
+  // 60173 — Schaumburg, IL: ZIP shares borders with Hoffman Estates, Rolling
+  // Meadows, Elk Grove Village, and Palatine. Curated centroids let users pick
+  // the neighboring town without an external geocoding call.
+  "60173": [
+    { city: "Hoffman Estates", state: "IL", lat: 42.0451, lng: -88.1078, radiusMiles: 5 },
+    { city: "Rolling Meadows", state: "IL", lat: 42.0667, lng: -88.0394, radiusMiles: 4 },
+    { city: "Elk Grove Village", state: "IL", lat: 42.0084, lng: -88.014, radiusMiles: 5 },
+    { city: "Palatine", state: "IL", lat: 42.1136, lng: -88.0707, radiusMiles: 5 }
   ]
 };
 

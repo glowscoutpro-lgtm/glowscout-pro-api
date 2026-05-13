@@ -106,7 +106,29 @@ export const EMBEDDED_ZIP_CENTROIDS: Record<string, Omit<ZipCentroid, "postalCod
   "27601": { lat: 35.7782, lng: -78.6388, city: "Raleigh", state: "NC" },
   "28202": { lat: 35.2275, lng: -80.8388, city: "Charlotte", state: "NC" },
   "37203": { lat: 36.1518, lng: -86.7942, city: "Nashville", state: "TN" },
-  "37206": { lat: 36.1839, lng: -86.7423, city: "Nashville", state: "TN" }
+  "37206": { lat: 36.1839, lng: -86.7423, city: "Nashville", state: "TN" },
+  // Chicago northwest suburbs — Schaumburg + neighboring towns. One ZIP per
+  // town keeps the city-index centroid pinned to a single, verified location
+  // and avoids skewing city-level coords when multiple ZIPs share a town.
+  // 60173 reuses the live-verified centroid the production geocoder returns,
+  // so the offline city/state path produces the same searchCenter as the ZIP
+  // 60173 path.
+  "60173": { lat: 42.0581, lng: -88.0482, city: "Schaumburg", state: "IL" },
+  "60169": { lat: 42.0451, lng: -88.1078, city: "Hoffman Estates", state: "IL" },
+  "60067": { lat: 42.1136, lng: -88.0707, city: "Palatine", state: "IL" },
+  "60005": { lat: 42.0625, lng: -87.9941, city: "Arlington Heights", state: "IL" },
+  "60007": { lat: 42.0084, lng: -88.014, city: "Elk Grove Village", state: "IL" },
+  "60008": { lat: 42.0667, lng: -88.0394, city: "Rolling Meadows", state: "IL" },
+  "60010": { lat: 42.1611, lng: -88.1486, city: "Barrington", state: "IL" },
+  "60061": { lat: 42.2484, lng: -87.9622, city: "Vernon Hills", state: "IL" },
+  "60048": { lat: 42.2864, lng: -87.9509, city: "Libertyville", state: "IL" },
+  "60089": { lat: 42.1681, lng: -87.9594, city: "Buffalo Grove", state: "IL" },
+  "60090": { lat: 42.1473, lng: -87.9881, city: "Wheeling", state: "IL" },
+  "60201": { lat: 42.0501, lng: -87.6877, city: "Evanston", state: "IL" },
+  "60302": { lat: 41.8932, lng: -87.7894, city: "Oak Park", state: "IL" },
+  "60515": { lat: 41.7969, lng: -88.0117, city: "Downers Grove", state: "IL" },
+  "60540": { lat: 41.7717, lng: -88.1471, city: "Naperville", state: "IL" },
+  "60525": { lat: 41.8025, lng: -87.8662, city: "La Grange", state: "IL" }
 };
 
 const RESOLUTION_CACHE = new Map<string, ZipCentroid | null>();

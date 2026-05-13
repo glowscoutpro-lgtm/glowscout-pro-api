@@ -88,6 +88,69 @@ const lakeZurichPayload = {
   ]
 };
 
+// Mixed live-Places payload for Schaumburg, IL (60173). Includes an in-radius
+// Schaumburg provider, a far-out La Grange provider (~28 miles south), and an
+// out-of-state WI provider. All pass quality filters — the radius + state
+// filter must keep La Grange and Kenosha out, exactly as ZIP 60173 already
+// does in production.
+const schaumburgPayload = {
+  places: [
+    {
+      id: "schaumburg-in-radius",
+      displayName: { text: "Woodfield Nail Lounge" },
+      formattedAddress: "5 Woodfield Mall, Schaumburg, IL 60173, USA",
+      rating: 4.9,
+      userRatingCount: 150,
+      location: { latitude: 42.0581, longitude: -88.0482 },
+      addressComponents: [
+        { longText: "Schaumburg", shortText: "Schaumburg", types: ["locality"] },
+        { longText: "Illinois", shortText: "IL", types: ["administrative_area_level_1"] },
+        { longText: "60173", shortText: "60173", types: ["postal_code"] }
+      ]
+    },
+    {
+      id: "hoffman-estates-in-radius",
+      displayName: { text: "Hoffman Estates Beauty Bar" },
+      formattedAddress: "100 Higgins Rd, Hoffman Estates, IL 60169, USA",
+      rating: 4.7,
+      userRatingCount: 90,
+      location: { latitude: 42.0451, longitude: -88.1078 },
+      addressComponents: [
+        { longText: "Hoffman Estates", shortText: "Hoffman Estates", types: ["locality"] },
+        { longText: "Illinois", shortText: "IL", types: ["administrative_area_level_1"] },
+        { longText: "60169", shortText: "60169", types: ["postal_code"] }
+      ]
+    },
+    {
+      id: "la-grange-far",
+      displayName: { text: "La Grange Nail Tech" },
+      formattedAddress: "10 Calendar Ave, La Grange, IL 60525, USA",
+      rating: 4.8,
+      userRatingCount: 90,
+      // ~28 miles south of Schaumburg — must be excluded by radius filter.
+      location: { latitude: 41.805, longitude: -87.87 },
+      addressComponents: [
+        { longText: "La Grange", shortText: "La Grange", types: ["locality"] },
+        { longText: "Illinois", shortText: "IL", types: ["administrative_area_level_1"] },
+        { longText: "60525", shortText: "60525", types: ["postal_code"] }
+      ]
+    },
+    {
+      id: "wi-out-of-state",
+      displayName: { text: "Milwaukee Beauty Bar" },
+      formattedAddress: "1 Wisconsin Ave, Milwaukee, WI 53202, USA",
+      rating: 4.9,
+      userRatingCount: 200,
+      location: { latitude: 43.0389, longitude: -87.9065 },
+      addressComponents: [
+        { longText: "Milwaukee", shortText: "Milwaukee", types: ["locality"] },
+        { longText: "Wisconsin", shortText: "WI", types: ["administrative_area_level_1"] },
+        { longText: "53202", shortText: "53202", types: ["postal_code"] }
+      ]
+    }
+  ]
+};
+
 let capturedPlacesBody: Record<string, unknown> | null = null;
 
 function installGeocoderDeniedStub(): void {
@@ -105,6 +168,26 @@ function installGeocoderDeniedStub(): void {
       return stub(lakeZurichPayload) as unknown as Response;
     }
     if (url.includes("api.zippopotam.us")) {
+      return stub({}, false, 404) as unknown as Response;
+    }
+    throw new Error("unexpected fetch in test: " + url);
+  }) as typeof globalThis.fetch;
+}
+
+function installSchaumburgGeocoderDeniedStub(): void {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.includes("maps.googleapis.com/maps/api/geocode")) {
+      return stub({ status: "REQUEST_DENIED" }) as unknown as Response;
+    }
+    if (url.includes("places.googleapis.com")) {
+      const raw = init?.body;
+      if (typeof raw === "string") capturedPlacesBody = JSON.parse(raw);
+      return stub(schaumburgPayload) as unknown as Response;
+    }
+    if (url.includes("api.zippopotam.us")) {
+      // Even Zippopotam is unreachable — exercises the deepest fallback path:
+      // city/state offline catalog only, no remote ZIP resolution.
       return stub({}, false, 404) as unknown as Response;
     }
     throw new Error("unexpected fetch in test: " + url);
@@ -320,6 +403,165 @@ async function liveSearchLakeZurichGeocoderAndPlacesParity(): Promise<void> {
   assert(matches, "Lake Zurich, IL surfaces the same providers as ZIP 60047");
 }
 
+function resolverSchaumburg(): void {
+  const offline = resolveOfflineCityState("Schaumburg, IL");
+  assert(offline != null, "resolveOfflineCityState matches 'Schaumburg, IL'");
+  assert(
+    offline?.city === "Schaumburg",
+    `Schaumburg, IL city is 'Schaumburg' (got ${offline?.city})`
+  );
+  assert(offline?.state === "IL", `Schaumburg, IL state is IL (got ${offline?.state})`);
+  // Must match the verified live-backend center for ZIP 60173 so the city
+  // path and the ZIP path produce the same searchCenter.
+  assert(
+    offline != null && Math.abs(offline.lat - 42.0581) < 0.001,
+    `Schaumburg, IL lat == 60173 centroid 42.0581 (got ${offline?.lat})`
+  );
+  assert(
+    offline != null && Math.abs(offline.lng + 88.0482) < 0.001,
+    `Schaumburg, IL lng == 60173 centroid -88.0482 (got ${offline?.lng})`
+  );
+  assert(offline?.postalCode === "60173", "Schaumburg, IL representative ZIP is 60173");
+  assert(offline?.source === "embedded", "Schaumburg resolves from embedded ZIP catalog");
+}
+
+function resolverSchaumburgStateMismatchReturnsNull(): void {
+  const offline = resolveOfflineCityState("Schaumburg, WI");
+  assert(offline === null, "Schaumburg, WI returns null (state mismatch)");
+}
+
+async function liveSearchSchaumburgWhenGeocoderFails(): Promise<void> {
+  installSchaumburgGeocoderDeniedStub();
+  resetState();
+  const survey: SurveyPayload = {
+    location: "Schaumburg, IL",
+    category: "nails",
+    services: ["gel-manicure"],
+    preferences: [],
+    maxDistanceMiles: 10
+  };
+  const result = await searchGooglePlaces(survey, "fake-key");
+
+  assert(
+    result.debug.searchCenter != null,
+    "Schaumburg, IL produces a non-null searchCenter when geocoding fails"
+  );
+  assert(
+    result.debug.searchCenter != null &&
+      Math.abs(result.debug.searchCenter.lat - 42.0581) < 0.001,
+    `Schaumburg searchCenter.lat == 60173 centroid 42.0581 (got ${result.debug.searchCenter?.lat})`
+  );
+  assert(
+    result.debug.searchCenter != null &&
+      Math.abs(result.debug.searchCenter.lng + 88.0482) < 0.001,
+    `Schaumburg searchCenter.lng == 60173 centroid -88.0482 (got ${result.debug.searchCenter?.lng})`
+  );
+  assert(
+    result.debug.searchCenter?.radiusMiles === 10,
+    "Requested 10-mile radius is reflected in searchCenter"
+  );
+  assert(
+    result.debug.resolvedLocation?.administrativeArea === "IL",
+    "Resolved state is IL"
+  );
+  assert(
+    result.debug.resolvedLocation?.locality === "Schaumburg",
+    "Resolved locality is Schaumburg"
+  );
+  assert(
+    result.debug.resolvedLocation?.postalCode === "60173",
+    "Resolved postalCode is 60173"
+  );
+  assert(
+    result.debug.resolvedLocation?.source === "zip-centroid",
+    "Schaumburg city/state fallback reports source=zip-centroid"
+  );
+  assert(
+    result.pros.length > 0,
+    `Schaumburg, IL returns >0 pros (got ${result.pros.length})`
+  );
+  assert(
+    result.pros.some((p) => /Woodfield/.test(p.name)),
+    "Live pros include the in-radius IL Schaumburg provider (Woodfield Nail Lounge)"
+  );
+  assert(
+    !result.pros.some((p) => /la grange/i.test(p.address)),
+    "Live pros exclude La Grange (out of radius, ~28 miles south)"
+  );
+  assert(
+    !result.pros.some((p) => / WI /.test(p.address)),
+    "Live pros exclude WI provider (state filter)"
+  );
+  assert(
+    result.pros.every((p) => typeof p.distanceMiles === "number" && p.distanceMiles <= 10),
+    "All returned pros are within 10 miles of the resolved Schaumburg center"
+  );
+  assert(
+    capturedPlacesBody != null &&
+      typeof capturedPlacesBody.locationBias === "object" &&
+      capturedPlacesBody.locationBias != null,
+    "Places call carries a locationBias circle (no unrestricted no-center search)"
+  );
+}
+
+async function liveSearchSchaumburgZipAndCityParity(): Promise<void> {
+  // The reported regression: ZIP 60173 worked (5 nail results, center
+  // 42.0581/-88.0482) but "Schaumburg, IL" returned 0 with a null
+  // searchCenter. This asserts parity is restored — same center, same
+  // provider set, same provider IDs.
+  installSchaumburgGeocoderDeniedStub();
+  resetState();
+  const cityResult = await searchGooglePlaces(
+    {
+      location: "Schaumburg, IL",
+      category: "nails",
+      services: [],
+      preferences: [],
+      maxDistanceMiles: 10
+    },
+    "fake-key"
+  );
+  resetState();
+  installSchaumburgGeocoderDeniedStub();
+  const zipResult = await searchGooglePlaces(
+    {
+      location: "60173",
+      category: "nails",
+      services: [],
+      preferences: [],
+      maxDistanceMiles: 10
+    },
+    "fake-key"
+  );
+
+  assert(
+    cityResult.pros.length > 0,
+    "Schaumburg, IL returns >0 pros (the regression the user reported)"
+  );
+  assert(
+    zipResult.pros.length > 0,
+    "ZIP 60173 still returns >0 pros (baseline parity check)"
+  );
+  assert(
+    cityResult.pros.length === zipResult.pros.length,
+    `Schaumburg, IL and ZIP 60173 return the same provider count ` +
+      `(city=${cityResult.pros.length}, zip=${zipResult.pros.length})`
+  );
+
+  assert(
+    cityResult.debug.searchCenter != null &&
+      zipResult.debug.searchCenter != null &&
+      Math.abs(cityResult.debug.searchCenter.lat - zipResult.debug.searchCenter.lat) < 0.001 &&
+      Math.abs(cityResult.debug.searchCenter.lng - zipResult.debug.searchCenter.lng) < 0.001,
+    "Schaumburg, IL and ZIP 60173 share the same searchCenter coordinates"
+  );
+
+  const cityIds = new Set(cityResult.pros.map((p) => p.id));
+  const zipIds = new Set(zipResult.pros.map((p) => p.id));
+  const matches = [...cityIds].every((id) => zipIds.has(id));
+  assert(matches, "Schaumburg, IL surfaces the same provider IDs as ZIP 60173");
+}
+
 async function run(): Promise<void> {
   const originalFetch = globalThis.fetch;
   try {
@@ -329,9 +571,13 @@ async function run(): Promise<void> {
     resolverCaseAndSpacingTolerant();
     resolverUnknownCityReturnsNull();
     resolverStateMismatchReturnsNull();
+    resolverSchaumburg();
+    resolverSchaumburgStateMismatchReturnsNull();
     await liveSearchLakeZurichWhenGeocoderFails();
     await liveSearchLongGroveWhenGeocoderFails();
     await liveSearchLakeZurichGeocoderAndPlacesParity();
+    await liveSearchSchaumburgWhenGeocoderFails();
+    await liveSearchSchaumburgZipAndCityParity();
   } finally {
     globalThis.fetch = originalFetch;
   }
